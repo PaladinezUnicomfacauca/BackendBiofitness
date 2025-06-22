@@ -1,13 +1,14 @@
-const express = require("express");
-const router = express.Router();
-const {
+import express from "express";
+import {
   getPlans,
   getPlanById,
   createPlan,
   updatePlan,
   deletePlan,
   getPlanMemberships,
-} = require("../controllers/planController");
+} from "../controllers/planController.js";
+
+const router = express.Router();
 
 // Rutas básicas CRUD
 router.get("/", getPlans);
@@ -19,4 +20,4 @@ router.delete("/:id", deletePlan);
 // Ruta para obtener membresías de un plan
 router.get("/:id/memberships", getPlanMemberships);
 
-module.exports = router;
+export default router;

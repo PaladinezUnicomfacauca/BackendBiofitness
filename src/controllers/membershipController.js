@@ -1,5 +1,5 @@
-const Membership = require("../models/membershipModel");
-const db = require("../config/connection");
+import Membership from "../models/membershipModel.js";
+import db from "../config/connection.js";
 
 // Obtener todas las membresías
 const getMemberships = async (req, res) => {
@@ -169,7 +169,7 @@ const getAllMemberships = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   getMemberships,
   getMembershipById,
   createMembership,

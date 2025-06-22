@@ -1,6 +1,5 @@
-const express = require("express");
-const router = express.Router();
-const {
+import express from "express";
+import {
   getMemberships,
   getMembershipById,
   createMembership,
@@ -10,7 +9,9 @@ const {
   getExpiredMemberships,
   getActiveMemberships,
   getAllMemberships,
-} = require("../controllers/membershipController");
+} from "../controllers/membershipController.js";
+
+const router = express.Router();
 
 // Rutas básicas CRUD
 router.get("/", getMemberships);
@@ -27,4 +28,4 @@ router.get("/active", getActiveMemberships);
 // Obtener todas las membresías con detalles
 router.get("/all", getAllMemberships);
 
-module.exports = router;
+export default router;

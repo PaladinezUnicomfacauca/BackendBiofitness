@@ -1,13 +1,14 @@
-const express = require("express");
-const router = express.Router();
-const {
+import express from "express";
+import {
   getPaymentMethods,
   getPaymentMethodById,
   createPaymentMethod,
   updatePaymentMethod,
   deletePaymentMethod,
   getPaymentMethodMemberships,
-} = require("../controllers/paymentMethodController");
+} from "../controllers/paymentMethodController.js";
+
+const router = express.Router();
 
 // Rutas básicas CRUD
 router.get("/", getPaymentMethods);
@@ -19,4 +20,4 @@ router.delete("/:id", deletePaymentMethod);
 // Ruta para obtener membresías de un método de pago
 router.get("/:id/memberships", getPaymentMethodMemberships);
 
-module.exports = router;
+export default router;

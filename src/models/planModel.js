@@ -1,4 +1,4 @@
-const pool = require("../config/connection");
+import pool from "../config/connection.js";
 
 class Plan {
   // Obtener todos los planes
@@ -79,4 +79,4 @@ class Plan {
   }
 }
 
-module.exports = Plan;
+export default Plan;

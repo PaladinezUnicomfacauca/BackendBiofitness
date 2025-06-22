@@ -1,14 +1,14 @@
-const express = require("express");
-const cors = require("cors");
-require("dotenv").config();
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import managerRoutes from "./routes/managerRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import membershipRoutes from "./routes/membershipRoutes.js";
+import planRoutes from "./routes/planRoutes.js";
+import paymentMethodRoutes from "./routes/paymentMethodRoutes.js";
+import estateRoutes from "./routes/estateRoutes.js";
 
-// Importar rutas
-const managerRoutes = require("./routes/managerRoutes");
-const userRoutes = require("./routes/userRoutes");
-const membershipRoutes = require("./routes/membershipRoutes");
-const planRoutes = require("./routes/planRoutes");
-const paymentMethodRoutes = require("./routes/paymentMethodRoutes");
-const estateRoutes = require("./routes/estateRoutes");
+dotenv.config();
 
 const app = express();
 
@@ -38,5 +38,5 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });

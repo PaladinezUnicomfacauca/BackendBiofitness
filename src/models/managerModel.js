@@ -1,4 +1,4 @@
-const db = require("../config/connection");
+import db from "../config/connection.js";
 
 class Manager {
   // Validar datos del manager (sin validación de contraseña)
@@ -105,4 +105,4 @@ class Manager {
   }
 }
 
-module.exports = Manager;
+export default Manager;

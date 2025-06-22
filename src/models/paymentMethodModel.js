@@ -1,4 +1,4 @@
-const pool = require("../config/connection");
+import pool from "../config/connection.js";
 
 class PaymentMethod {
   // Obtener todos los métodos de pago
@@ -76,4 +76,4 @@ class PaymentMethod {
   }
 }
 
-module.exports = PaymentMethod;
+export default PaymentMethod;

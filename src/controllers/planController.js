@@ -1,4 +1,4 @@
-const Plan = require("../models/planModel");
+import Plan from "../models/planModel.js";
 
 // Obtener todos los planes
 const getPlans = async (req, res) => {
@@ -88,7 +88,7 @@ const getPlanMemberships = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   getPlans,
   getPlanById,
   createPlan,

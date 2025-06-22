@@ -1,6 +1,7 @@
-const express = require("express");
+import express from "express";
+import managerController from "../controllers/managerController.js";
+
 const router = express.Router();
-const managerController = require("../controllers/managerController");
 
 // Rutas públicas
 router.get("/", managerController.getManagers);
@@ -10,4 +11,4 @@ router.put("/:id", managerController.updateManager);
 router.delete("/:id", managerController.deleteManager);
 router.get("/:id/memberships", managerController.getManagerMemberships);
 
-module.exports = router;
+export default router;

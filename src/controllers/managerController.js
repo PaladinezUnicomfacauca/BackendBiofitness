@@ -1,4 +1,4 @@
-const Manager = require("../models/managerModel");
+import Manager from "../models/managerModel.js";
 
 // Obtener todos los managers
 const getManagers = async (req, res) => {
@@ -88,7 +88,7 @@ const getManagerMemberships = async (req, res) => {
   }
 };
 
-module.exports = {
+export default {
   getManagers,
   getManagerById,
   createManager,

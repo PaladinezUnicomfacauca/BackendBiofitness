@@ -1,4 +1,4 @@
-const User = require("../models/userModel");
+import User from "../models/userModel.js";
 
 // Obtener todos los usuarios
 const getUsers = async (req, res) => {
@@ -88,7 +88,7 @@ const getUserMemberships = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   getUsers,
   getUserById,
   createUser,

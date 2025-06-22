@@ -1,4 +1,4 @@
-const pool = require("../config/connection");
+import pool from "../config/connection.js";
 
 class User {
   // Obtener todos los usuarios
@@ -78,4 +78,4 @@ class User {
   }
 }
 
-module.exports = User;
+export default User;

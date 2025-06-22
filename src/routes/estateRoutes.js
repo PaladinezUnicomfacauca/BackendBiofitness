@@ -1,13 +1,14 @@
-const express = require("express");
-const router = express.Router();
-const {
+import express from "express";
+import {
   getAllEstates,
   getEstateById,
   createEstate,
   updateEstate,
   deleteEstate,
   searchEstates,
-} = require("../controllers/estateController");
+} from "../controllers/estateController.js";
+
+const router = express.Router();
 
 // Obtener todos los estados
 router.get("/", getAllEstates);
@@ -27,4 +28,4 @@ router.put("/:id", updateEstate);
 // Eliminar un estado
 router.delete("/:id", deleteEstate);
 
-module.exports = router;
+export default router;

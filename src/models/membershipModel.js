@@ -1,4 +1,4 @@
-const pool = require("../config/connection");
+import pool from "../config/connection.js";
 
 class Membership {
   // Obtener todas las membresías
@@ -191,4 +191,4 @@ class Membership {
   }
 }
 
-module.exports = Membership;
+export default Membership;

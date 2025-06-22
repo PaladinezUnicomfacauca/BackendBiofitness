@@ -1,4 +1,4 @@
-const PaymentMethod = require("../models/paymentMethodModel");
+import PaymentMethod from "../models/paymentMethodModel.js";
 
 // Obtener todos los métodos de pago
 const getPaymentMethods = async (req, res) => {
@@ -88,7 +88,7 @@ const getPaymentMethodMemberships = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   getPaymentMethods,
   getPaymentMethodById,
   createPaymentMethod,

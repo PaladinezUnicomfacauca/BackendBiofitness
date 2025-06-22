@@ -1,4 +1,4 @@
-const Estate = require("../models/estateModel");
+import Estate from "../models/estateModel.js";
 
 // Obtener todos los estados
 const getAllEstates = async (req, res) => {
@@ -132,7 +132,7 @@ const searchEstates = async (req, res) => {
   }
 };
 
-module.exports = {
+export {
   getAllEstates,
   getEstateById,
   createEstate,

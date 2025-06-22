@@ -1,4 +1,4 @@
-const db = require("../config/connection");
+import db from "../config/connection.js";
 
 class Estate {
   // Validar datos del estate
@@ -79,4 +79,4 @@ class Estate {
   }
 }
 
-module.exports = Estate;
+export default Estate;
