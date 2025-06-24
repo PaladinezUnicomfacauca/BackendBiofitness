@@ -4,20 +4,15 @@ import {
   getPaymentMethodById,
   createPaymentMethod,
   updatePaymentMethod,
-  deletePaymentMethod,
-  getPaymentMethodMemberships,
-} from "../controllers/paymentMethodController.js";
+  deletePaymentMethod
+} from "../controllers/paymentMethodsController.js";
 
 const router = express.Router();
 
-// Rutas básicas CRUD
 router.get("/", getPaymentMethods);
 router.get("/:id", getPaymentMethodById);
 router.post("/", createPaymentMethod);
 router.put("/:id", updatePaymentMethod);
 router.delete("/:id", deletePaymentMethod);
 
-// Ruta para obtener membresías de un método de pago
-router.get("/:id/memberships", getPaymentMethodMemberships);
-
-export default router;
+export default router; 
