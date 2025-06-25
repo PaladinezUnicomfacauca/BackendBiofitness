@@ -4,7 +4,10 @@ import { pool } from "../db/conn.js";
 export const getMemberships = async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT m.*, 
+      SELECT m.id_membership,
+        TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
+        TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
+        m.receipt_number, m.days_arrears, m.id_manager, m.id_user, m.id_plan, m.id_method, m.id_state,
         u.name_user, u.phone AS user_phone, 
         p.days_duration, p.price, 
         pm.name_method, 
@@ -32,7 +35,10 @@ export const getMembershipById = async (req, res) => {
       return res.status(400).json({ error: "Invalid membership ID" });
     }
     const { rows } = await pool.query(`
-      SELECT m.*, 
+      SELECT m.id_membership,
+        TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
+        TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
+        m.receipt_number, m.days_arrears, m.id_manager, m.id_user, m.id_plan, m.id_method, m.id_state,
         u.name_user, u.phone AS user_phone, 
         p.days_duration, p.price, 
         pm.name_method, 
@@ -58,11 +64,14 @@ export const getMembershipById = async (req, res) => {
 // Crear una nueva membresía
 export const createMembership = async (req, res) => {
   try {
-    const { last_payment, expiration_date, receipt_number, days_arrears = 0, id_user, id_plan, id_method, id_state, id_manager } = req.body;
-    // Validaciones básicas
-    if (!last_payment || !expiration_date || !receipt_number || !id_user || !id_plan || !id_method || !id_state || !id_manager) {
-      return res.status(400).json({ error: "All fields are required" });
+    // expiration_date ya no se recibe, se calcula.
+    const { receipt_number, days_arrears, id_user, id_plan, id_method, id_state, id_manager } = req.body;
+    
+    // Validaciones básicas - expiration_date ya no es requerido.
+    if (!receipt_number || !id_user || !id_plan || !id_method || !id_state || !id_manager) {
+      return res.status(400).json({ error: "receipt_number, id_user, id_plan, id_method, id_state, and id_manager are required" });
     }
+    
     // Validar unicidad de receipt_number
     const receiptCheck = await pool.query(
       "SELECT id_membership FROM memberships WHERE receipt_number = $1",
@@ -71,11 +80,62 @@ export const createMembership = async (req, res) => {
     if (receiptCheck.rows.length > 0) {
       return res.status(400).json({ error: "Receipt number already exists" });
     }
-    const { rows } = await pool.query(
-      `INSERT INTO memberships (last_payment, expiration_date, receipt_number, days_arrears, id_user, id_plan, id_method, id_state, id_manager)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [last_payment, expiration_date, receipt_number, days_arrears, id_user, id_plan, id_method, id_state, id_manager]
+    
+    // 1. Obtener los días de duración del plan
+    const planResult = await pool.query(
+      "SELECT days_duration FROM plans WHERE id_plan = $1",
+      [id_plan]
     );
+
+    if (planResult.rows.length === 0) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+    const daysDuration = planResult.rows[0].days_duration;
+
+    // 2. Insertar la membresía calculando la fecha de expiración
+    const insertQuery = `
+      INSERT INTO memberships (
+        last_payment,
+        expiration_date,
+        receipt_number,
+        days_arrears,
+        id_user,
+        id_plan,
+        id_method,
+        id_state,
+        id_manager
+      )
+      VALUES (
+        CURRENT_DATE,
+        CURRENT_DATE + ($1 - 1) * INTERVAL '1 day',
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8
+      )
+      RETURNING 
+        id_membership, 
+        TO_CHAR(last_payment, 'YYYY-MM-DD') as last_payment, 
+        TO_CHAR(expiration_date, 'YYYY-MM-DD') as expiration_date,
+        receipt_number, days_arrears, id_manager, id_user, id_plan, id_method, id_state
+    `;
+
+    const values = [
+      daysDuration,
+      receipt_number,
+      days_arrears || 0,
+      id_user,
+      id_plan,
+      id_method,
+      id_state,
+      id_manager
+    ];
+
+    const { rows } = await pool.query(insertQuery, values);
+    
     res.status(201).json(rows[0]);
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -159,7 +219,7 @@ export const updateMembership = async (req, res) => {
     }
     values.push(id);
     const { rows } = await pool.query(
-      `UPDATE memberships SET ${updateFields.join(', ')} WHERE id_membership = $${paramCount} RETURNING *`,
+      `UPDATE memberships SET ${updateFields.join(', ')} WHERE id_membership = $${paramCount} RETURNING id_membership, TO_CHAR(last_payment, 'YYYY-MM-DD') as last_payment, TO_CHAR(expiration_date, 'YYYY-MM-DD') as expiration_date, receipt_number, days_arrears, id_manager, id_user, id_plan, id_method, id_state`,
       values
     );
     return res.json(rows[0]);

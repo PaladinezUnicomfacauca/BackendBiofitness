@@ -26,16 +26,16 @@ CREATE TABLE users (
     id_user SERIAL PRIMARY KEY,
     name_user VARCHAR(40) NOT NULL,
     phone VARCHAR(10) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at DATE DEFAULT CURRENT_DATE,
+    updated_at DATE DEFAULT CURRENT_DATE
 );
 
 CREATE TABLE memberships (
     id_membership SERIAL PRIMARY KEY,
-    last_payment DATE NOT NULL,
+    last_payment DATE DEFAULT CURRENT_DATE,
     expiration_date DATE NOT NULL,
-    receipt_number varchar(6) UNIQUE NOT NULL,
-    days_arrears INT DEFAULT 0,
+    receipt_number VARCHAR(10) UNIQUE NOT NULL,
+    days_arrears INT DEFAULT 0, 
     id_manager INTEGER NOT NULL REFERENCES managers(id_manager)
         ON DELETE RESTRICT  
         ON UPDATE CASCADE,

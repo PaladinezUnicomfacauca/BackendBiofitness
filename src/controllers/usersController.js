@@ -2,7 +2,7 @@ import { pool } from "../db/conn.js";
 
 export const getUsers = async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM users ORDER BY id_user DESC");
+    const { rows } = await pool.query("SELECT id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at, TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at FROM users ORDER BY id_user DESC");
     return res.status(200).json(rows);
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -19,7 +19,7 @@ export const getUserById = async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      "SELECT * FROM users WHERE id_user = $1",
+      "SELECT id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at, TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at FROM users WHERE id_user = $1",
       [id]
     );
 
@@ -36,6 +36,11 @@ export const getUserById = async (req, res) => {
 export const createUser = async (req, res) => {
   try {
     const { name_user, phone } = req.body;
+
+    // Validar que el teléfono tenga exactamente 10 dígitos
+    if (!/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+    }
 
     // Verificar que el teléfono no esté duplicado
     const phoneCheck = await pool.query(
@@ -73,6 +78,11 @@ export const updateUser = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    // Si se está actualizando el teléfono, validar que tenga exactamente 10 dígitos
+    if (phone !== undefined && !/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+    }
+
     // Si se está actualizando el teléfono, verificar que no esté duplicado
     if (phone) {
       const phoneCheck = await pool.query(
@@ -101,11 +111,11 @@ export const updateUser = async (req, res) => {
       paramCount++;
     }
 
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
+    updateFields.push(`updated_at = CURRENT_DATE`);
     values.push(id);
 
     const { rows } = await pool.query(
-      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING *`,
+      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at, TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at`,
       values
     );
 

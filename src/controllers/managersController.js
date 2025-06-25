@@ -37,6 +37,17 @@ export const createManager = async (req, res) => {
   try {
     const { name_manager, phone, email, password } = req.body;
 
+    // Validar que el teléfono tenga exactamente 10 dígitos
+    if (!/^\d{10}$/.test(phone)) {
+      return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+    }
+
+    // Validar formato de email: debe contener @ y el dominio debe tener 2 o 3 letras
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,3}$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: "Invalid email format. Email must contain '@' and a valid domain (2-3 letters)." });
+    }
+
     // Verificar que el teléfono no esté duplicado
     const phoneCheck = await pool.query(
       "SELECT id_manager FROM managers WHERE phone = $1",
@@ -83,15 +94,26 @@ export const updateManager = async (req, res) => {
       return res.status(404).json({ error: "Manager not found" });
     }
 
-    // Si se está actualizando el teléfono, verificar que no esté duplicado
-    if (phone) {
+    // Si se está actualizando el teléfono, validar que tenga exactamente 10 dígitos
+    if (phone !== undefined) {
+      if (!/^\d{10}$/.test(phone)) {
+        return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+      }
+      // Verificar que no esté duplicado
       const phoneCheck = await pool.query(
         "SELECT id_manager FROM managers WHERE phone = $1 AND id_manager != $2",
         [phone, id]
       );
-
       if (phoneCheck.rows.length > 0) {
         return res.status(400).json({ error: "Phone number already exists" });
+      }
+    }
+
+    // Si se está actualizando el email, validar formato
+    if (email !== undefined) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,3}$/;
+      if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: "Invalid email format. Email must contain '@' and a valid domain (2-3 letters)." });
       }
     }
 
@@ -136,8 +158,6 @@ export const updateManager = async (req, res) => {
       paramCount++;
     }
 
-    // Agregar updated_at y el id del manager
-    updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(id);
 
     const { rows } = await pool.query(
