@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import cron from "node-cron";
 import managersRoutes from "./routes/managersRoutes.js";
 import usersRoutes from "./routes/usersRoutes.js";
 import membershipsRoutes from "./routes/membershipsRoutes.js";
@@ -29,6 +30,23 @@ apiRouter.use("/states", statesRoutes);
 
 // Usar el router de la API con el prefijo /api
 app.use("/api", apiRouter);
+
+// Configurar cron job para actualizar estados diariamente a las 0:00 AM (medianoche)
+cron.schedule('0 0 * * *', async () => {
+  console.log(`[${new Date().toISOString()}] Ejecutando actualización automática de estados de membresías...`);
+  try {
+    // Importar dinámicamente para evitar problemas de dependencias circulares
+    const { updateAllMembershipStates } = await import('./scripts/updateStates.js');
+    await updateAllMembershipStates();
+    console.log(`[${new Date().toISOString()}] Actualización automática completada exitosamente`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error en actualización automática:`, error.message);
+  }
+}, {
+  scheduled: true,
+  timezone: "America/Bogota" // Ajustar a tu zona horaria
+});
+
 
 // Middleware para rutas no encontradas
 app.use((req, res, next) => {
