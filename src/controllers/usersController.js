@@ -471,3 +471,265 @@ export const getUserByIdWithActiveMembership = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+// Actualizar usuario con membresía en una sola transacción
+export const updateUserWithMembership = async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { 
+      name_user, 
+      phone, 
+      id_plan, 
+      id_method, 
+      id_manager 
+    } = req.body;
+
+    // Validaciones
+    if (!name_user || !phone || !id_plan || !id_method || !id_manager) {
+      return res.status(400).json({ 
+        error: "name_user, phone, id_plan, id_method, and id_manager are required" 
+      });
+    }
+
+    // Verificar que el usuario existe
+    const userCheck = await pool.query(
+      "SELECT id_user FROM users WHERE id_user = $1",
+      [userId]
+    );
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Verificar que el teléfono no esté duplicado (excluyendo el usuario actual)
+    const phoneCheck = await pool.query(
+      "SELECT id_user FROM users WHERE phone = $1 AND id_user != $2",
+      [phone, userId]
+    );
+    if (phoneCheck.rows.length > 0) {
+      return res.status(400).json({ error: "Phone number already exists" });
+    }
+
+    // Verificar que el plan existe
+    const planResult = await pool.query(
+      "SELECT days_duration FROM plans WHERE id_plan = $1",
+      [id_plan]
+    );
+    if (planResult.rows.length === 0) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+    const daysDuration = planResult.rows[0].days_duration;
+
+    // Verificar que el método de pago existe
+    const methodResult = await pool.query(
+      "SELECT id_method FROM payment_methods WHERE id_method = $1",
+      [id_method]
+    );
+    if (methodResult.rows.length === 0) {
+      return res.status(404).json({ error: "Payment method not found" });
+    }
+
+    // Verificar que el manager existe
+    const managerResult = await pool.query(
+      "SELECT id_manager FROM managers WHERE id_manager = $1",
+      [id_manager]
+    );
+    if (managerResult.rows.length === 0) {
+      return res.status(404).json({ error: "Manager not found" });
+    }
+
+    // Iniciar transacción
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Actualizar el usuario
+      await client.query(`
+        UPDATE users 
+        SET name_user = $1, phone = $2, updated_at = CURRENT_DATE
+        WHERE id_user = $3
+      `, [name_user, phone, userId]);
+
+      // 2. Obtener la membresía activa actual
+      const currentMembership = await client.query(`
+        SELECT id_membership, id_state
+        FROM memberships 
+        WHERE id_user = $1 AND id_state IN (1, 2) -- Vigente o Por vencer
+        ORDER BY id_membership DESC 
+        LIMIT 1
+      `, [userId]);
+
+      if (currentMembership.rows.length > 0) {
+        // 3. Actualizar la membresía existente
+        const membershipId = currentMembership.rows[0].id_membership;
+        
+        // Generar nuevo receipt_number
+        const lastReceipt = await client.query(
+          "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
+        );
+        let nextNumber = 1;
+        if (lastReceipt.rows.length > 0) {
+          const last = lastReceipt.rows[0].receipt_number;
+          const match = last.match(/^OG-(\d{7})$/);
+          if (match) {
+            nextNumber = parseInt(match[1], 10) + 1;
+          }
+        }
+        const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
+
+        // Calcular nueva fecha de expiración
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+        const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+        // Calcular estado y días de mora
+        const today = new Date();
+        const expiration = new Date(expirationDateStr);
+        const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
+        
+        let stateName;
+        let daysArrears = 0;
+        
+        if (daysUntilExpiration > 5) {
+          stateName = "Vigente";
+        } else if (daysUntilExpiration >= 0) {
+          stateName = "Por vencer";
+        } else {
+          stateName = "Vencido";
+          daysArrears = Math.abs(daysUntilExpiration);
+        }
+        
+        const stateResult = await client.query(
+          "SELECT id_state FROM states WHERE name_state = $1",
+          [stateName]
+        );
+        
+        if (stateResult.rows.length === 0) {
+          throw new Error(`State '${stateName}' not found in database`);
+        }
+        
+        const id_state = stateResult.rows[0].id_state;
+
+        // Actualizar la membresía
+        await client.query(`
+          UPDATE memberships 
+          SET last_payment = CURRENT_DATE,
+              expiration_date = $1,
+              receipt_number = $2,
+              days_arrears = $3,
+              id_plan = $4,
+              id_method = $5,
+              id_state = $6,
+              id_manager = $7
+          WHERE id_membership = $8
+        `, [
+          expirationDateStr,
+          receipt_number,
+          daysArrears,
+          id_plan,
+          id_method,
+          id_state,
+          id_manager,
+          membershipId
+        ]);
+      } else {
+        // 4. Crear nueva membresía si no existe una activa
+        const lastReceipt = await client.query(
+          "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
+        );
+        let nextNumber = 1;
+        if (lastReceipt.rows.length > 0) {
+          const last = lastReceipt.rows[0].receipt_number;
+          const match = last.match(/^OG-(\d{7})$/);
+          if (match) {
+            nextNumber = parseInt(match[1], 10) + 1;
+          }
+        }
+        const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
+
+        // Calcular fecha de expiración
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+        const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+        // Calcular estado y días de mora
+        const today = new Date();
+        const expiration = new Date(expirationDateStr);
+        const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
+        
+        let stateName;
+        let daysArrears = 0;
+        
+        if (daysUntilExpiration > 5) {
+          stateName = "Vigente";
+        } else if (daysUntilExpiration >= 0) {
+          stateName = "Por vencer";
+        } else {
+          stateName = "Vencido";
+          daysArrears = Math.abs(daysUntilExpiration);
+        }
+        
+        const stateResult = await client.query(
+          "SELECT id_state FROM states WHERE name_state = $1",
+          [stateName]
+        );
+        
+        if (stateResult.rows.length === 0) {
+          throw new Error(`State '${stateName}' not found in database`);
+        }
+        
+        const id_state = stateResult.rows[0].id_state;
+
+        // Crear nueva membresía
+        await client.query(`
+          INSERT INTO memberships (
+            last_payment,
+            expiration_date,
+            receipt_number,
+            days_arrears,
+            id_user,
+            id_plan,
+            id_method,
+            id_state,
+            id_manager
+          )
+          VALUES (
+            CURRENT_DATE,
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8
+          )
+        `, [
+          expirationDateStr,
+          receipt_number,
+          daysArrears,
+          userId,
+          id_plan,
+          id_method,
+          id_state,
+          id_manager
+        ]);
+      }
+
+      await client.query('COMMIT');
+      
+      // Obtener datos actualizados
+      const updatedUser = await getActiveMembership(userId);
+      res.status(200).json({
+        ...user,
+        active_membership: updatedUser
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};

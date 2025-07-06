@@ -39,33 +39,39 @@ const calculateStateAndArrears = async (expirationDate) => {
   };
 };
 
+// Función interna para actualizar automáticamente estados y días de mora de todas las membresías
+const updateAllMembershipStatesInternal = async () => {
+  // Obtener todas las membresías
+  const { rows: memberships } = await pool.query(`
+    SELECT id_membership, expiration_date, days_arrears, id_state 
+    FROM memberships
+  `);
+
+  let updatedCount = 0;
+  
+  for (const membership of memberships) {
+    const { id_state: newStateId, days_arrears: newDaysArrears } = await calculateStateAndArrears(membership.expiration_date);
+    
+    // Solo actualizar si hay cambios
+    if (newStateId !== membership.id_state || newDaysArrears !== membership.days_arrears) {
+      await pool.query(
+        "UPDATE memberships SET id_state = $1, days_arrears = $2 WHERE id_membership = $3",
+        [newStateId, newDaysArrears, membership.id_membership]
+      );
+      updatedCount++;
+    }
+  }
+  
+  return { updatedCount };
+};
+
 // Función para actualizar automáticamente estados y días de mora de todas las membresías
 export const updateAllMembershipStates = async (req, res) => {
   try {
-    // Obtener todas las membresías
-    const { rows: memberships } = await pool.query(`
-      SELECT id_membership, expiration_date, days_arrears, id_state 
-      FROM memberships
-    `);
-
-    let updatedCount = 0;
-    
-    for (const membership of memberships) {
-      const { id_state: newStateId, days_arrears: newDaysArrears } = await calculateStateAndArrears(membership.expiration_date);
-      
-      // Solo actualizar si hay cambios
-      if (newStateId !== membership.id_state || newDaysArrears !== membership.days_arrears) {
-        await pool.query(
-          "UPDATE memberships SET id_state = $1, days_arrears = $2 WHERE id_membership = $3",
-          [newStateId, newDaysArrears, membership.id_membership]
-        );
-        updatedCount++;
-      }
-    }
-
+    const result = await updateAllMembershipStatesInternal();
     return res.status(200).json({ 
-      message: `Updated ${updatedCount} memberships`, 
-      updatedCount 
+      message: `Updated ${result.updatedCount} memberships`, 
+      updatedCount: result.updatedCount 
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -75,6 +81,9 @@ export const updateAllMembershipStates = async (req, res) => {
 // Obtener todas las membresías con información relacionada (incluyendo manager)
 export const getMemberships = async (req, res) => {
   try {
+    // Primero actualizar automáticamente todos los estados y días de mora
+    await updateAllMembershipStatesInternal();
+    
     const { rows } = await pool.query(`
       SELECT m.id_membership,
         TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
@@ -92,7 +101,7 @@ export const getMemberships = async (req, res) => {
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
-      ORDER BY m.id_membership DESC
+      ORDER BY m.id_membership ASC
     `);
     return res.status(200).json(rows);
   } catch (error) {
@@ -380,6 +389,9 @@ export const deleteMembership = async (req, res) => {
 // Obtener solo las membresías activas (Vigente y Por vencer)
 export const getActiveMemberships = async (req, res) => {
   try {
+    // Primero actualizar automáticamente todos los estados y días de mora
+    await updateAllMembershipStatesInternal();
+    
     const { rows } = await pool.query(`
       SELECT m.id_membership,
         TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,

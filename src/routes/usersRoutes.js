@@ -6,6 +6,7 @@ import {
   updateUser,
   deleteUser,
   createUserWithMembership,
+  updateUserWithMembership,
   getUserMemberships,
   getUsersWithActiveMemberships,
   getUserByIdWithActiveMembership
@@ -26,6 +27,7 @@ router.get("/:id/memberships", getUserMemberships);
 router.post("/", createUser);
 router.post("/with-membership", createUserWithMembership);
 router.put("/:id", updateUser);
+router.put("/:id/with-membership", updateUserWithMembership);
 router.delete("/:id", deleteUser);
 
 export default router;
