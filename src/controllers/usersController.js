@@ -485,9 +485,9 @@ export const updateUserWithMembership = async (req, res) => {
     } = req.body;
 
     // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method || !id_manager) {
+    if (!name_user || !phone || !id_plan || !id_method) {
       return res.status(400).json({ 
-        error: "name_user, phone, id_plan, id_method, and id_manager are required" 
+        error: "name_user, phone, id_plan, and id_method are required" 
       });
     }
 
@@ -528,13 +528,30 @@ export const updateUserWithMembership = async (req, res) => {
       return res.status(404).json({ error: "Payment method not found" });
     }
 
-    // Verificar que el manager existe
-    const managerResult = await pool.query(
-      "SELECT id_manager FROM managers WHERE id_manager = $1",
-      [id_manager]
-    );
-    if (managerResult.rows.length === 0) {
-      return res.status(404).json({ error: "Manager not found" });
+    // Obtener el manager actual si no se proporciona uno nuevo
+    let finalManagerId = id_manager;
+    if (!id_manager) {
+      const currentMembership = await pool.query(`
+        SELECT id_manager FROM memberships 
+        WHERE id_user = $1 
+        ORDER BY id_membership DESC 
+        LIMIT 1
+      `, [userId]);
+      
+      if (currentMembership.rows.length === 0) {
+        return res.status(400).json({ error: "No membership found for user and no manager provided" });
+      }
+      
+      finalManagerId = currentMembership.rows[0].id_manager;
+    } else {
+      // Verificar que el manager existe si se proporciona uno nuevo
+      const managerResult = await pool.query(
+        "SELECT id_manager FROM managers WHERE id_manager = $1",
+        [id_manager]
+      );
+      if (managerResult.rows.length === 0) {
+        return res.status(404).json({ error: "Manager not found" });
+      }
     }
 
     // Iniciar transacción
@@ -628,7 +645,7 @@ export const updateUserWithMembership = async (req, res) => {
           id_plan,
           id_method,
           id_state,
-          id_manager,
+          finalManagerId,
           membershipId
         ]);
       } else {
@@ -711,17 +728,24 @@ export const updateUserWithMembership = async (req, res) => {
           id_plan,
           id_method,
           id_state,
-          id_manager
+          finalManagerId
         ]);
       }
 
       await client.query('COMMIT');
       
-      // Obtener datos actualizados
-      const updatedUser = await getActiveMembership(userId);
+      // Obtener datos actualizados del usuario
+      const updatedUserResult = await client.query(`
+        SELECT id_user, name_user, phone, 
+          TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
+          TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+        FROM users 
+        WHERE id_user = $1
+      `, [userId]);
+      
       res.status(200).json({
-        ...user,
-        active_membership: updatedUser
+        message: "User updated successfully",
+        user: updatedUserResult.rows[0]
       });
     } catch (error) {
       await client.query('ROLLBACK');
