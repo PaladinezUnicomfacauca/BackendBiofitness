@@ -205,10 +205,12 @@ export const createUserWithMembership = async (req, res) => {
     }
 
     // Verificar que el receipt_number no esté duplicado
+    console.log('Checking receipt_number:', receipt_number);
     const receiptCheck = await pool.query(
       "SELECT id_membership FROM memberships WHERE receipt_number = $1",
       [receipt_number]
     );
+    console.log('Receipt check result:', receiptCheck.rows);
     if (receiptCheck.rows.length > 0) {
       return res.status(400).json({ error: "Receipt number already exists" });
     }
@@ -255,12 +257,24 @@ export const createUserWithMembership = async (req, res) => {
       
       const userId = userResult.rows[0].id_user;
 
-      // 2. Calcular fecha de expiración
+      // 2. Verificar nuevamente que el receipt_number no esté duplicado (dentro de la transacción)
+      console.log('Double-checking receipt_number within transaction:', receipt_number);
+      const receiptCheckInTransaction = await client.query(
+        "SELECT id_membership FROM memberships WHERE receipt_number = $1",
+        [receipt_number]
+      );
+      console.log('Receipt check within transaction result:', receiptCheckInTransaction.rows);
+      if (receiptCheckInTransaction.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: "Receipt number already exists" });
+      }
+
+      // 3. Calcular fecha de expiración
       const expirationDate = new Date();
       expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
       const expirationDateStr = expirationDate.toISOString().split('T')[0];
 
-      // 3. Calcular estado y días de mora
+      // 4. Calcular estado y días de mora
       const today = new Date();
       const expiration = new Date(expirationDateStr);
       const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
@@ -288,7 +302,19 @@ export const createUserWithMembership = async (req, res) => {
       
       const id_state = stateResult.rows[0].id_state;
 
-      // 4. Crear la membresía
+      // 5. Crear la membresía
+      console.log('Inserting membership with receipt_number:', receipt_number);
+      console.log('All values being inserted:', {
+        expirationDateStr,
+        receipt_number,
+        daysArrears,
+        userId,
+        id_plan,
+        id_method,
+        id_state,
+        id_manager
+      });
+      
       const membershipResult = await client.query(`
         INSERT INTO memberships (
           last_payment,
@@ -312,7 +338,7 @@ export const createUserWithMembership = async (req, res) => {
           $7,
           $8
         )
-        RETURNING id_membership
+        RETURNING id_membership, receipt_number
       `, [
         expirationDateStr,
         receipt_number,
@@ -323,10 +349,12 @@ export const createUserWithMembership = async (req, res) => {
         id_state,
         id_manager
       ]);
+      
+      console.log('Membership created with receipt_number:', membershipResult.rows[0].receipt_number);
 
       const membershipId = membershipResult.rows[0].id_membership;
 
-      // 5. Obtener datos completos para la respuesta
+      // 6. Obtener datos completos para la respuesta
       const finalResult = await client.query(`
         SELECT 
           u.id_user,
