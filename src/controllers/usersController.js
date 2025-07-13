@@ -184,13 +184,14 @@ export const createUserWithMembership = async (req, res) => {
       phone, 
       id_plan, 
       id_method, 
-      id_manager 
+      id_manager,
+      receipt_number
     } = req.body;
 
     // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method || !id_manager) {
+    if (!name_user || !phone || !id_plan || !id_method || !id_manager || !receipt_number) {
       return res.status(400).json({ 
-        error: "name_user, phone, id_plan, id_method, and id_manager are required" 
+        error: "name_user, phone, id_plan, id_method, id_manager y receipt_number son requeridos" 
       });
     }
 
@@ -245,26 +246,12 @@ export const createUserWithMembership = async (req, res) => {
       
       const userId = userResult.rows[0].id_user;
 
-      // 2. Generar receipt_number
-      const lastReceipt = await client.query(
-        "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
-      );
-      let nextNumber = 1;
-      if (lastReceipt.rows.length > 0) {
-        const last = lastReceipt.rows[0].receipt_number;
-        const match = last.match(/^OG-(\d{7})$/);
-        if (match) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
-      }
-      const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
-
-      // 3. Calcular fecha de expiración
+      // 2. Calcular fecha de expiración
       const expirationDate = new Date();
       expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
       const expirationDateStr = expirationDate.toISOString().split('T')[0];
 
-      // 4. Calcular estado y días de mora
+      // 3. Calcular estado y días de mora
       const today = new Date();
       const expiration = new Date(expirationDateStr);
       const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
@@ -292,7 +279,7 @@ export const createUserWithMembership = async (req, res) => {
       
       const id_state = stateResult.rows[0].id_state;
 
-      // 5. Crear la membresía
+      // 4. Crear la membresía
       const membershipResult = await client.query(`
         INSERT INTO memberships (
           last_payment,
@@ -330,7 +317,7 @@ export const createUserWithMembership = async (req, res) => {
 
       const membershipId = membershipResult.rows[0].id_membership;
 
-      // 6. Obtener datos completos para la respuesta
+      // 5. Obtener datos completos para la respuesta
       const finalResult = await client.query(`
         SELECT 
           u.id_user,
@@ -396,12 +383,12 @@ export const getUserMemberships = async (req, res) => {
         p.price,
         pm.name_method,
         s.name_state,
-        man.name_manager
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager
       FROM memberships m
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
-      JOIN managers man ON m.id_manager = man.id_manager
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
       WHERE m.id_user = $1
       ORDER BY m.id_membership DESC
     `, [id]);
@@ -481,13 +468,14 @@ export const updateUserWithMembership = async (req, res) => {
       phone, 
       id_plan, 
       id_method, 
-      id_manager 
+      id_manager,
+      receipt_number
     } = req.body;
 
     // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method) {
+    if (!name_user || !phone || !id_plan || !id_method || !receipt_number) {
       return res.status(400).json({ 
-        error: "name_user, phone, id_plan, and id_method are required" 
+        error: "name_user, phone, id_plan, id_method y receipt_number son requeridos" 
       });
     }
 
@@ -566,171 +554,78 @@ export const updateUserWithMembership = async (req, res) => {
         WHERE id_user = $3
       `, [name_user, phone, userId]);
 
-      // 2. Obtener la membresía activa actual
+      // 2. Obtener la membresía activa/más reciente
       const currentMembership = await client.query(`
         SELECT id_membership, id_state
         FROM memberships 
-        WHERE id_user = $1 AND id_state IN (1, 2) -- Vigente o Por vencer
+        WHERE id_user = $1 
         ORDER BY id_membership DESC 
         LIMIT 1
       `, [userId]);
 
-      if (currentMembership.rows.length > 0) {
-        // 3. Actualizar la membresía existente
-        const membershipId = currentMembership.rows[0].id_membership;
-        
-        // Generar nuevo receipt_number
-        const lastReceipt = await client.query(
-          "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
-        );
-        let nextNumber = 1;
-        if (lastReceipt.rows.length > 0) {
-          const last = lastReceipt.rows[0].receipt_number;
-          const match = last.match(/^OG-(\d{7})$/);
-          if (match) {
-            nextNumber = parseInt(match[1], 10) + 1;
-          }
-        }
-        const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
-
-        // Calcular nueva fecha de expiración
-        const expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-        const expirationDateStr = expirationDate.toISOString().split('T')[0];
-
-        // Calcular estado y días de mora
-        const today = new Date();
-        const expiration = new Date(expirationDateStr);
-        const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-        
-        let stateName;
-        let daysArrears = 0;
-        
-        if (daysUntilExpiration > 5) {
-          stateName = "Vigente";
-        } else if (daysUntilExpiration >= 0) {
-          stateName = "Por vencer";
-        } else {
-          stateName = "Vencido";
-          daysArrears = Math.abs(daysUntilExpiration);
-        }
-        
-        const stateResult = await client.query(
-          "SELECT id_state FROM states WHERE name_state = $1",
-          [stateName]
-        );
-        
-        if (stateResult.rows.length === 0) {
-          throw new Error(`State '${stateName}' not found in database`);
-        }
-        
-        const id_state = stateResult.rows[0].id_state;
-
-        // Actualizar la membresía
-        await client.query(`
-          UPDATE memberships 
-          SET last_payment = CURRENT_DATE,
-              expiration_date = $1,
-              receipt_number = $2,
-              days_arrears = $3,
-              id_plan = $4,
-              id_method = $5,
-              id_state = $6,
-              id_manager = $7
-          WHERE id_membership = $8
-        `, [
-          expirationDateStr,
-          receipt_number,
-          daysArrears,
-          id_plan,
-          id_method,
-          id_state,
-          finalManagerId,
-          membershipId
-        ]);
-      } else {
-        // 4. Crear nueva membresía si no existe una activa
-        const lastReceipt = await client.query(
-          "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
-        );
-        let nextNumber = 1;
-        if (lastReceipt.rows.length > 0) {
-          const last = lastReceipt.rows[0].receipt_number;
-          const match = last.match(/^OG-(\d{7})$/);
-          if (match) {
-            nextNumber = parseInt(match[1], 10) + 1;
-          }
-        }
-        const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
-
-        // Calcular fecha de expiración
-        const expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-        const expirationDateStr = expirationDate.toISOString().split('T')[0];
-
-        // Calcular estado y días de mora
-        const today = new Date();
-        const expiration = new Date(expirationDateStr);
-        const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-        
-        let stateName;
-        let daysArrears = 0;
-        
-        if (daysUntilExpiration > 5) {
-          stateName = "Vigente";
-        } else if (daysUntilExpiration >= 0) {
-          stateName = "Por vencer";
-        } else {
-          stateName = "Vencido";
-          daysArrears = Math.abs(daysUntilExpiration);
-        }
-        
-        const stateResult = await client.query(
-          "SELECT id_state FROM states WHERE name_state = $1",
-          [stateName]
-        );
-        
-        if (stateResult.rows.length === 0) {
-          throw new Error(`State '${stateName}' not found in database`);
-        }
-        
-        const id_state = stateResult.rows[0].id_state;
-
-        // Crear nueva membresía
-        await client.query(`
-          INSERT INTO memberships (
-            last_payment,
-            expiration_date,
-            receipt_number,
-            days_arrears,
-            id_user,
-            id_plan,
-            id_method,
-            id_state,
-            id_manager
-          )
-          VALUES (
-            CURRENT_DATE,
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8
-          )
-        `, [
-          expirationDateStr,
-          receipt_number,
-          daysArrears,
-          userId,
-          id_plan,
-          id_method,
-          id_state,
-          finalManagerId
-        ]);
+      if (currentMembership.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: "No membership found for user" });
       }
+
+      // 3. Actualizar la membresía existente
+      const membershipId = currentMembership.rows[0].id_membership;
+
+      // Calcular nueva fecha de expiración
+      const expirationDate = new Date();
+      expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+      const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+      // Calcular estado y días de mora
+      const today = new Date();
+      const expiration = new Date(expirationDateStr);
+      const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
+      
+      let stateName;
+      let daysArrears = 0;
+      
+      if (daysUntilExpiration > 5) {
+        stateName = "Vigente";
+      } else if (daysUntilExpiration >= 0) {
+        stateName = "Por vencer";
+      } else {
+        stateName = "Vencido";
+        daysArrears = Math.abs(daysUntilExpiration);
+      }
+      
+      const stateResult = await client.query(
+        "SELECT id_state FROM states WHERE name_state = $1",
+        [stateName]
+      );
+      
+      if (stateResult.rows.length === 0) {
+        throw new Error(`State '${stateName}' not found in database`);
+      }
+      
+      const id_state = stateResult.rows[0].id_state;
+
+      // Actualizar la membresía
+      await client.query(`
+        UPDATE memberships 
+        SET last_payment = CURRENT_DATE,
+            expiration_date = $1,
+            receipt_number = $2,
+            days_arrears = $3,
+            id_plan = $4,
+            id_method = $5,
+            id_state = $6,
+            id_manager = $7
+        WHERE id_membership = $8
+      `, [
+        expirationDateStr,
+        receipt_number,
+        daysArrears,
+        id_plan,
+        id_method,
+        id_state,
+        finalManagerId,
+        membershipId
+      ]);
 
       await client.query('COMMIT');
       

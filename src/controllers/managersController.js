@@ -82,16 +82,27 @@ export const createManager = async (req, res) => {
 export const updateManager = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { name_manager, phone, email, password } = req.body;
+    const { name_manager, phone, email, password, currentPassword } = req.body;
 
-    // Verificar que el manager existe
+    // Verificar que el manager existe y obtener la contraseña actual
     const managerCheck = await pool.query(
-      "SELECT id_manager FROM managers WHERE id_manager = $1",
+      "SELECT id_manager, password FROM managers WHERE id_manager = $1",
       [id]
     );
 
     if (managerCheck.rows.length === 0) {
       return res.status(404).json({ error: "Manager not found" });
+    }
+
+    // Si se va a cambiar la contraseña, validar la contraseña actual
+    if (password !== undefined) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: "La contraseña actual es obligatoria para cambiar la contraseña" });
+      }
+      const dbPassword = managerCheck.rows[0].password;
+      if (dbPassword !== currentPassword) {
+        return res.status(400).json({ error: "La contraseña actual es incorrecta" });
+      }
     }
 
     // Si se está actualizando el teléfono, validar que tenga exactamente 10 dígitos
@@ -175,18 +186,25 @@ export const deleteManager = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
 
-    // Verificar que el manager no tenga usuarios asociados
-    const usersCheck = await pool.query(
-      "SELECT id_user FROM users WHERE id_manager = $1",
+    // Obtener el nombre del manager antes de eliminarlo
+    const managerResult = await pool.query(
+      "SELECT name_manager FROM managers WHERE id_manager = $1",
       [id]
     );
-
-    if (usersCheck.rows.length > 0) {
-      return res.status(400).json({ 
-        error: "Cannot delete manager. There are users associated with this manager. Please reassign users first." 
-      });
+    if (managerResult.rows.length === 0) {
+      return res.status(404).json({ message: "Manager not found" });
     }
+    const managerName = managerResult.rows[0].name_manager;
 
+    // Actualizar las membresías asociadas: guardar el nombre y poner id_manager en NULL
+    await pool.query(
+      `UPDATE memberships 
+       SET manager_name_snapshot = $1, id_manager = NULL 
+       WHERE id_manager = $2`,
+      [managerName, id]
+    );
+
+    // Eliminar el manager
     const { rowCount } = await pool.query(
       "DELETE FROM managers WHERE id_manager = $1",
       [id]

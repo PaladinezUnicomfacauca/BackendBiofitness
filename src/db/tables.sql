@@ -36,8 +36,9 @@ CREATE TABLE memberships (
     expiration_date DATE NOT NULL,
     receipt_number VARCHAR(10) UNIQUE NOT NULL,
     days_arrears INT DEFAULT 0, 
-    id_manager INTEGER NOT NULL REFERENCES managers(id_manager)
-        ON DELETE RESTRICT  
+    manager_name_snapshot VARCHAR(40),
+    id_manager INTEGER NULL REFERENCES managers(id_manager)
+        ON DELETE SET NULL  
         ON UPDATE CASCADE,
     id_user INTEGER NOT NULL REFERENCES users(id_user)
         ON DELETE RESTRICT 

@@ -4,7 +4,7 @@ import {
   getManagerById,
   createManager,
   updateManager,
-  deleteManager
+  deleteManager,
 } from "../controllers/managersController.js";
 
 const router = express.Router();

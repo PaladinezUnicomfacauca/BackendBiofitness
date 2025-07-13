@@ -94,10 +94,10 @@ export const getMemberships = async (req, res) => {
         p.days_duration, p.price, 
         pm.name_method, 
         s.name_state,
-        man.name_manager
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager
       FROM memberships m
       JOIN users u ON m.id_user = u.id_user
-      JOIN managers man ON m.id_manager = man.id_manager
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
@@ -148,10 +148,11 @@ export const getMembershipById = async (req, res) => {
         p.days_duration, p.price, 
         pm.name_method, 
         s.name_state,
-        man.name_manager, man.email AS manager_email
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager, 
+        man.email AS manager_email
       FROM memberships m
       JOIN users u ON m.id_user = u.id_user
-      JOIN managers man ON m.id_manager = man.id_manager
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
@@ -167,11 +168,11 @@ export const getMembershipById = async (req, res) => {
 // Crear una nueva membresía
 export const createMembership = async (req, res) => {
   try {
-    const { id_user, id_plan, id_method, id_manager } = req.body;
+    const { id_user, id_plan, id_method, id_manager, receipt_number } = req.body;
 
     // Validaciones básicas
-    if (!id_user || !id_plan || !id_method || !id_manager) {
-      return res.status(400).json({ error: "id_user, id_plan, id_method, and id_manager are required" });
+    if (!id_user || !id_plan || !id_method || !id_manager || !receipt_number) {
+      return res.status(400).json({ error: "id_user, id_plan, id_method, id_manager y receipt_number son requeridos" });
     }
 
     // Verificar que el usuario existe
@@ -193,23 +194,28 @@ export const createMembership = async (req, res) => {
     }
     const daysDuration = planResult.rows[0].days_duration;
 
-    // 2. Generar el siguiente receipt_number
-    const lastReceipt = await pool.query(
-      "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
-    );
-    let nextNumber = 1;
-    if (lastReceipt.rows.length > 0) {
-      const last = lastReceipt.rows[0].receipt_number;
-      const match = last.match(/^OG-(\d{7})$/);
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
-    const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
+    // // 2. Generar el siguiente receipt_number (comentado)
+    // const lastReceipt = await pool.query(
+    //   "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
+    // );
+    // let nextNumber = 1;
+    // if (lastReceipt.rows.length > 0) {
+    //   const last = lastReceipt.rows[0].receipt_number;
+    //   const match = last.match(/^OG-(\d{7})$/);
+    //   if (match) {
+    //     nextNumber = parseInt(match[1], 10) + 1;
+    //   }
+    // }
+    // const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
 
     // 3. Calcular la fecha de expiración
-    const expirationDate = new Date();
-    expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+    let expirationDate = new Date();
+    if (daysDuration === 1) {
+      // Para plan de 1 día, la expiración es hoy
+      // (last_payment es hoy por defecto)
+    } else {
+      expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+    }
     const expirationDateStr = expirationDate.toISOString().split('T')[0];
 
     // 4. Calcular el estado y días de mora automáticamente
@@ -267,10 +273,10 @@ export const createMembership = async (req, res) => {
         p.days_duration, p.price, 
         pm.name_method, 
         s.name_state,
-        man.name_manager 
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager 
       FROM memberships m
       JOIN users u ON m.id_user = u.id_user
-      JOIN managers man ON m.id_manager = man.id_manager
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
@@ -402,10 +408,10 @@ export const getActiveMemberships = async (req, res) => {
         p.days_duration, p.price, 
         pm.name_method, 
         s.name_state,
-        man.name_manager
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager
       FROM memberships m
       JOIN users u ON m.id_user = u.id_user
-      JOIN managers man ON m.id_manager = man.id_manager
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
