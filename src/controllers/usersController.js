@@ -204,6 +204,15 @@ export const createUserWithMembership = async (req, res) => {
       return res.status(400).json({ error: "Phone number already exists" });
     }
 
+    // Verificar que el receipt_number no esté duplicado
+    const receiptCheck = await pool.query(
+      "SELECT id_membership FROM memberships WHERE receipt_number = $1",
+      [receipt_number]
+    );
+    if (receiptCheck.rows.length > 0) {
+      return res.status(400).json({ error: "Receipt number already exists" });
+    }
+
     // Verificar que el plan existe
     const planResult = await pool.query(
       "SELECT days_duration FROM plans WHERE id_plan = $1",
@@ -495,6 +504,17 @@ export const updateUserWithMembership = async (req, res) => {
     );
     if (phoneCheck.rows.length > 0) {
       return res.status(400).json({ error: "Phone number already exists" });
+    }
+
+    // Verificar que el receipt_number no esté duplicado (excluyendo la membresía actual del usuario)
+    const receiptCheck = await pool.query(`
+      SELECT m.id_membership 
+      FROM memberships m 
+      WHERE m.receipt_number = $1 
+      AND m.id_user != $2
+    `, [receipt_number, userId]);
+    if (receiptCheck.rows.length > 0) {
+      return res.status(400).json({ error: "Receipt number already exists" });
     }
 
     // Verificar que el plan existe

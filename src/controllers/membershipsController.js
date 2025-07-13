@@ -184,6 +184,15 @@ export const createMembership = async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
+    // Verificar que el receipt_number no esté duplicado
+    const receiptCheck = await pool.query(
+      "SELECT id_membership FROM memberships WHERE receipt_number = $1",
+      [receipt_number]
+    );
+    if (receiptCheck.rows.length > 0) {
+      return res.status(400).json({ error: "Receipt number already exists" });
+    }
+
     // 1. Obtener los días de duración del plan
     const planResult = await pool.query(
       "SELECT days_duration FROM plans WHERE id_plan = $1",
@@ -193,20 +202,6 @@ export const createMembership = async (req, res) => {
       return res.status(404).json({ error: "Plan not found" });
     }
     const daysDuration = planResult.rows[0].days_duration;
-
-    // // 2. Generar el siguiente receipt_number (comentado)
-    // const lastReceipt = await pool.query(
-    //   "SELECT receipt_number FROM memberships ORDER BY id_membership DESC LIMIT 1"
-    // );
-    // let nextNumber = 1;
-    // if (lastReceipt.rows.length > 0) {
-    //   const last = lastReceipt.rows[0].receipt_number;
-    //   const match = last.match(/^OG-(\d{7})$/);
-    //   if (match) {
-    //     nextNumber = parseInt(match[1], 10) + 1;
-    //   }
-    // }
-    // const receipt_number = `OG-${nextNumber.toString().padStart(7, '0')}`;
 
     // 3. Calcular la fecha de expiración
     let expirationDate = new Date();
