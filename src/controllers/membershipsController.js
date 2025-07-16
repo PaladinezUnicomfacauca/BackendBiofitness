@@ -168,11 +168,11 @@ export const getMembershipById = async (req, res) => {
 // Crear una nueva membresía
 export const createMembership = async (req, res) => {
   try {
-    const { id_user, id_plan, id_method, id_manager, receipt_number } = req.body;
+    const { id_user, id_plan, id_method, receipt_number } = req.body;
 
     // Validaciones básicas
-    if (!id_user || !id_plan || !id_method || !id_manager || !receipt_number) {
-      return res.status(400).json({ error: "id_user, id_plan, id_method, id_manager y receipt_number son requeridos" });
+    if (!id_user || !id_plan || !id_method || !receipt_number) {
+      return res.status(400).json({ error: "id_user, id_plan, id_method y receipt_number son requeridos" });
     }
 
     // Verificar que el usuario existe
@@ -185,12 +185,10 @@ export const createMembership = async (req, res) => {
     }
 
     // Verificar que el receipt_number no esté duplicado
-    console.log('Checking receipt_number in memberships controller:', receipt_number);
     const receiptCheck = await pool.query(
       "SELECT id_membership FROM memberships WHERE receipt_number = $1",
       [receipt_number]
     );
-    console.log('Receipt check result in memberships controller:', receiptCheck.rows);
     if (receiptCheck.rows.length > 0) {
       return res.status(400).json({ error: "Receipt number already exists" });
     }
@@ -219,18 +217,6 @@ export const createMembership = async (req, res) => {
     const { id_state, days_arrears: calculatedDaysArrears } = await calculateStateAndArrears(expirationDateStr);
 
     // 5. Insertar la nueva membresía
-    console.log('Inserting membership with receipt_number:', receipt_number);
-    console.log('All values being inserted:', {
-      expirationDateStr,
-      receipt_number,
-      calculatedDaysArrears,
-      id_user,
-      id_plan,
-      id_method,
-      id_state,
-      id_manager
-    });
-    
     const insertQuery = `
       INSERT INTO memberships (
         last_payment,
@@ -265,12 +251,11 @@ export const createMembership = async (req, res) => {
       id_plan,
       id_method,
       id_state,
-      id_manager
+      req.manager.id_manager
     ];
 
     const { rows } = await pool.query(insertQuery, values);
     const newMembershipId = rows[0].id_membership;
-    console.log('Membership created with receipt_number:', rows[0].receipt_number);
 
     // 6. Obtener la membresía completa para la respuesta
     const membershipResult = await pool.query(`
@@ -303,7 +288,7 @@ export const createMembership = async (req, res) => {
 export const updateMembership = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { last_payment, expiration_date, receipt_number, days_arrears, id_user, id_plan, id_method, id_state, id_manager } = req.body;
+    const { last_payment, expiration_date, receipt_number, days_arrears, id_user, id_plan, id_method, id_state } = req.body;
     // Verificar que la membresía existe
     const membershipCheck = await pool.query(
       "SELECT id_membership FROM memberships WHERE id_membership = $1",
@@ -364,11 +349,6 @@ export const updateMembership = async (req, res) => {
     if (id_state !== undefined) {
       updateFields.push(`id_state = $${paramCount}`);
       values.push(id_state);
-      paramCount++;
-    }
-    if (id_manager !== undefined) {
-      updateFields.push(`id_manager = $${paramCount}`);
-      values.push(id_manager);
       paramCount++;
     }
     if (updateFields.length === 0) {

@@ -5,23 +5,19 @@ import {
   createMembership,
   updateMembership,
   deleteMembership,
-  updateAllMembershipStates,
-  getActiveMemberships
+  getActiveMemberships,
+  updateAllMembershipStates
 } from "../controllers/membershipsController.js";
+import { authenticateManager } from "../index.js";
 
 const router = express.Router();
 
-// Rutas básicas (muestran todas las membresías)
 router.get("/", getMemberships);
+router.get("/active", getActiveMemberships);
 router.get("/:id", getMembershipById);
-
-// Rutas específicas
-router.get("/active/list", getActiveMemberships);
-router.put("/update-states/all", updateAllMembershipStates);
-
-// Rutas de creación y modificación
-router.post("/", createMembership);
-router.put("/:id", updateMembership);
+router.post("/", authenticateManager, createMembership);
+router.put("/:id", authenticateManager, updateMembership);
 router.delete("/:id", deleteMembership);
+router.post("/update-states", updateAllMembershipStates);
 
 export default router; 

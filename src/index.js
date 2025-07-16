@@ -2,7 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import cron from "node-cron";
-import managersRoutes from "./routes/managersRoutes.js";
+import jwt from "jsonwebtoken";
+import managersRoutes from "./routes/managersRoutes.js"; // Incluye /api/managers/login para autenticación JWT
 import usersRoutes from "./routes/usersRoutes.js";
 import membershipsRoutes from "./routes/membershipsRoutes.js";
 import plansRoutes from "./routes/plansRoutes.js";
@@ -12,6 +13,22 @@ import statesRoutes from "./routes/statesRoutes.js";
 dotenv.config();
 
 const app = express();
+
+// Middleware de autenticación JWT
+export function authenticateManager(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.manager = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
 
 // Middleware
 app.use(cors());

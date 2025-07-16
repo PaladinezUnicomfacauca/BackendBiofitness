@@ -1,4 +1,6 @@
 import { pool } from "../db/conn.js";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 
 export const getManagers = async (req, res) => {
   try {
@@ -68,9 +70,11 @@ export const createManager = async (req, res) => {
       return res.status(400).json({ error: "Email already exists" });
     }
 
+    // Hashear la contraseña antes de guardar
+    const hashedPassword = await bcrypt.hash(password, 10);
     const { rows } = await pool.query(
       "INSERT INTO managers (name_manager, phone, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
-      [name_manager, phone, email, password]
+      [name_manager, phone, email, hashedPassword]
     );
 
     res.status(201).json(rows[0]);
@@ -100,7 +104,8 @@ export const updateManager = async (req, res) => {
         return res.status(400).json({ error: "La contraseña actual es obligatoria para cambiar la contraseña" });
       }
       const dbPassword = managerCheck.rows[0].password;
-      if (dbPassword !== currentPassword) {
+      const passwordMatch = await bcrypt.compare(currentPassword, dbPassword);
+      if (!passwordMatch) {
         return res.status(400).json({ error: "La contraseña actual es incorrecta" });
       }
     }
@@ -164,8 +169,10 @@ export const updateManager = async (req, res) => {
     }
 
     if (password !== undefined) {
+      // Hashear la nueva contraseña antes de guardar
+      const hashedPassword = await bcrypt.hash(password, 10);
       updateFields.push(`password = $${paramCount}`);
-      values.push(password);
+      values.push(hashedPassword);
       paramCount++;
     }
 
@@ -215,6 +222,46 @@ export const deleteManager = async (req, res) => {
     }
 
     return res.sendStatus(204);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const loginManager = async (req, res) => {
+  try {
+    const { name_manager, password } = req.body;
+    if (!name_manager || !password) {
+      return res.status(400).json({ error: "Name and password are required" });
+    }
+    // Buscar manager por name_manager
+    const { rows } = await pool.query(
+      "SELECT id_manager, name_manager, email, password FROM managers WHERE name_manager = $1",
+      [name_manager]
+    );
+    if (rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    const manager = rows[0];
+    // Comparar contraseña
+    const passwordMatch = await bcrypt.compare(password, manager.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    // Generar JWT
+    const token = jwt.sign(
+      { id_manager: manager.id_manager, name_manager: manager.name_manager },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    // Devolver token y datos básicos
+    return res.status(200).json({
+      token,
+      manager: {
+        id_manager: manager.id_manager,
+        name_manager: manager.name_manager,
+        email: manager.email
+      }
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

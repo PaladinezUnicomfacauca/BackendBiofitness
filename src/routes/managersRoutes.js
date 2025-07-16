@@ -5,6 +5,7 @@ import {
   createManager,
   updateManager,
   deleteManager,
+  loginManager
 } from "../controllers/managersController.js";
 
 const router = express.Router();
@@ -14,5 +15,6 @@ router.get("/:id", getManagerById);
 router.post("/", createManager);
 router.put("/:id", updateManager);
 router.delete("/:id", deleteManager);
+router.post("/login", loginManager);
 
 export default router; 

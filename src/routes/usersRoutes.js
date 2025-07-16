@@ -6,28 +6,24 @@ import {
   updateUser,
   deleteUser,
   createUserWithMembership,
-  updateUserWithMembership,
   getUserMemberships,
   getUsersWithActiveMemberships,
-  getUserByIdWithActiveMembership
+  getUserByIdWithActiveMembership,
+  updateUserWithMembership
 } from "../controllers/usersController.js";
+import { authenticateManager } from "../index.js";
 
 const router = express.Router();
 
-// Rutas básicas (muestran solo información de usuarios)
 router.get("/", getUsers);
 router.get("/:id", getUserById);
-
-// Rutas con información de membresías
+router.post("/", createUser);
+router.put("/:id", updateUser);
+router.delete("/:id", deleteUser);
+router.post("/with-membership", authenticateManager, createUserWithMembership);
+router.get("/:id/memberships", getUserMemberships);
 router.get("/with-memberships/active", getUsersWithActiveMemberships);
 router.get("/:id/with-membership", getUserByIdWithActiveMembership);
-router.get("/:id/memberships", getUserMemberships);
-
-// Rutas de creación y modificación
-router.post("/", createUser);
-router.post("/with-membership", createUserWithMembership);
-router.put("/:id", updateUser);
-router.put("/:id/with-membership", updateUserWithMembership);
-router.delete("/:id", deleteUser);
+router.put("/:id/with-membership", authenticateManager, updateUserWithMembership);
 
 export default router;
