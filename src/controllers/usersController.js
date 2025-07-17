@@ -555,12 +555,12 @@ export const updateUserWithMembership = async (req, res) => {
         ORDER BY id_membership DESC 
         LIMIT 1
       `, [userId]);
-      
-      if (currentMembership.rows.length === 0) {
-        return res.status(400).json({ error: "No membership found for user and no manager provided" });
+      if (currentMembership.rows.length === 0 || !currentMembership.rows[0].id_manager) {
+        // Si no hay membresía previa o el id_manager es null, usa el admin logueado
+        finalManagerId = req.manager.id_manager;
+      } else {
+        finalManagerId = currentMembership.rows[0].id_manager;
       }
-      
-      finalManagerId = currentMembership.rows[0].id_manager;
     } else {
       // Verificar que el manager existe si se proporciona uno nuevo
       const managerResult = await pool.query(
@@ -570,6 +570,7 @@ export const updateUserWithMembership = async (req, res) => {
       if (managerResult.rows.length === 0) {
         return res.status(404).json({ error: "Manager not found" });
       }
+      finalManagerId = id_manager;
     }
 
     // Iniciar transacción
