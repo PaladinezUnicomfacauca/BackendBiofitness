@@ -3,13 +3,13 @@ import cors from "cors";
 import dotenv from "dotenv";
 import cron from "node-cron";
 import jwt from "jsonwebtoken";
-import managersRoutes from "./routes/managersRoutes.js"; // Incluye /api/managers/login para autenticación JWT
+import managersRoutes from "./routes/managersRoutes.js"; 
 import usersRoutes from "./routes/usersRoutes.js";
 import membershipsRoutes from "./routes/membershipsRoutes.js";
 import plansRoutes from "./routes/plansRoutes.js";
 import paymentMethodsRoutes from "./routes/paymentMethodsRoutes.js";
 import statesRoutes from "./routes/statesRoutes.js";
-import healthCheckRoutes from "./routes/healthCheck.js";
+import healthCheckRoutes from "./routes/healthCheck.js"; 
 
 dotenv.config();
 

@@ -1,4 +1,5 @@
 import { pool } from "../db/conn.js";
+import ExcelJS from 'exceljs';
 
 // Función helper para calcular el estado y días de mora basado en la fecha de expiración
 const calculateStateAndArrears = async (expirationDate) => {
@@ -411,5 +412,141 @@ export const getActiveMemberships = async (req, res) => {
     return res.status(200).json(rows);
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+}; 
+
+// Exportar membresías a Excel
+export const exportMembershipsToExcel = async (req, res) => {
+  try {
+    // Obtener los filtros de la query
+    const { searchTerm, selectedState, selectedPlan } = req.query;
+    
+    // Primero actualizar automáticamente todos los estados y días de mora
+    await updateAllMembershipStatesInternal();
+    
+    // Construir la consulta base
+    let query = `
+      SELECT m.id_membership,
+        TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
+        TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
+        m.receipt_number, m.days_arrears, m.id_manager, m.id_user, m.id_plan, m.id_method, m.id_state,
+        u.name_user, u.phone AS user_phone, 
+        TO_CHAR(u.created_at, 'YYYY-MM-DD') as user_created_at,
+        p.days_duration, p.price, 
+        pm.name_method, 
+        s.name_state,
+        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager
+      FROM memberships m
+      JOIN users u ON m.id_user = u.id_user
+      LEFT JOIN managers man ON m.id_manager = man.id_manager
+      JOIN plans p ON m.id_plan = p.id_plan
+      JOIN payment_methods pm ON m.id_method = pm.id_method
+      JOIN states s ON m.id_state = s.id_state
+    `;
+    
+    const conditions = [];
+    const params = [];
+    let paramCount = 1;
+    
+    // Aplicar filtros si se proporcionan
+    if (searchTerm && searchTerm.trim() !== '') {
+      conditions.push(`(LOWER(u.name_user) LIKE LOWER($${paramCount}) OR LOWER(u.phone) LIKE LOWER($${paramCount}))`);
+      params.push(`%${searchTerm.trim()}%`);
+      paramCount++;
+    }
+    
+    if (selectedState && selectedState !== 'todos') {
+      conditions.push(`s.name_state = $${paramCount}`);
+      params.push(selectedState);
+      paramCount++;
+    }
+    
+    if (selectedPlan && selectedPlan !== 'todos') {
+      conditions.push(`p.days_duration = $${paramCount}`);
+      params.push(parseInt(selectedPlan));
+      paramCount++;
+    }
+    
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    
+    query += ` ORDER BY m.id_membership ASC`;
+    
+    // Ejecutar la consulta
+    const { rows } = await pool.query(query, params);
+    
+    // Crear el archivo Excel
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Membresías');
+    
+    // Definir los headers
+    const headers = [
+      'No.',
+      'Nombre',
+      'Teléfono',
+      'Fecha inscripción',
+      'Último pago',
+      'Método de pago',
+      'Administrador',
+      'No. recibo',
+      'Plan',
+      'Vence',
+      'Estado',
+      'Días en mora'
+    ];
+    
+    // Añadir headers
+    worksheet.addRow(headers);
+    
+    // Aplicar negrilla a los headers
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true };
+    
+    // Añadir datos
+    rows.forEach((row, index) => {
+      worksheet.addRow([
+        index + 1, 
+        row.name_user,
+        row.user_phone,
+        row.user_created_at,
+        row.last_payment,
+        row.name_method,
+        row.name_manager,
+        row.receipt_number,
+        `${row.days_duration} ${row.days_duration === 1 ? 'día' : 'días'}`,
+        row.expiration_date,
+        row.name_state,
+        row.days_arrears > 0 ? row.days_arrears : ''
+      ]);
+    });
+    
+    // Aplicar filtro solo en los headers
+    worksheet.autoFilter = {
+      from: 'A1',
+      to: `L1`
+    };
+
+    worksheet.columns.forEach(column => {
+      let maxLength = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        const cellValue = cell.value ? cell.value.toString() : '';
+        maxLength = Math.max(maxLength, cellValue.length);
+      });
+      column.width = maxLength + 2; // +2 para un poco de espacio extra
+    });
+    
+    // Configurar headers de respuesta
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="membresias.xlsx"');
+    res.setHeader('Cache-Control', 'no-cache');
+    
+    // Escribir el archivo a la respuesta
+    await workbook.xlsx.write(res);
+    res.end();
+    
+  } catch (error) {
+    console.error('Error exporting to Excel:', error);
+    return res.status(500).json({ error: 'Error al exportar a Excel' });
   }
 }; 
