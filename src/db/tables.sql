@@ -8,8 +8,9 @@ CREATE TABLE managers (
 
 CREATE TABLE plans (
     id_plan SERIAL PRIMARY KEY,
-    days_duration INT UNIQUE NOT NULL,
-    price INT UNIQUE NOT NULL
+    days_duration INT NOT NULL,
+    price INT UNIQUE NOT NULL,
+    plan_description VARCHAR(22) UNIQUE NOT NULL
 );
 
 CREATE TABLE payment_methods (

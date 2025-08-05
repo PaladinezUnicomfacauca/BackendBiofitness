@@ -35,7 +35,7 @@ export const getPlanById = async (req, res) => {
 
 export const createPlan = async (req, res) => {
   try {
-    const { days_duration, price } = req.body;
+    const { days_duration, price, plan_description } = req.body;
 
     // Validar que days_duration sea un número positivo
     if (!days_duration || days_duration <= 0) {
@@ -45,6 +45,11 @@ export const createPlan = async (req, res) => {
     // Validar que price sea un número positivo
     if (!price || price <= 0) {
       return res.status(400).json({ error: "Price must be a positive number" });
+    }
+
+    // Validar que plan_description no esté vacío
+    if (!plan_description || plan_description.trim() === '') {
+      return res.status(400).json({ error: "Plan description cannot be empty" });
     }
 
     // Verificar que no exista un plan con la misma duración
@@ -57,9 +62,19 @@ export const createPlan = async (req, res) => {
       return res.status(400).json({ error: "A plan with this duration already exists" });
     }
 
+    // Verificar que no exista un plan con la misma descripción
+    const descriptionCheck = await pool.query(
+      "SELECT id_plan FROM plans WHERE plan_description = $1",
+      [plan_description]
+    );
+
+    if (descriptionCheck.rows.length > 0) {
+      return res.status(400).json({ error: "A plan with this description already exists" });
+    }
+
     const { rows } = await pool.query(
-      "INSERT INTO plans (days_duration, price) VALUES ($1, $2) RETURNING *",
-      [days_duration, price]
+      "INSERT INTO plans (days_duration, price, plan_description) VALUES ($1, $2, $3) RETURNING *",
+      [days_duration, price, plan_description]
     );
 
     res.status(201).json(rows[0]);
@@ -71,7 +86,7 @@ export const createPlan = async (req, res) => {
 export const updatePlan = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { days_duration, price } = req.body;
+    const { days_duration, price, plan_description } = req.body;
 
     // Verificar que el plan existe
     const planCheck = await pool.query(
@@ -95,6 +110,18 @@ export const updatePlan = async (req, res) => {
       }
     }
 
+    // Si se está actualizando plan_description, verificar que no esté duplicado
+    if (plan_description) {
+      const descriptionCheck = await pool.query(
+        "SELECT id_plan FROM plans WHERE plan_description = $1 AND id_plan != $2",
+        [plan_description, id]
+      );
+
+      if (descriptionCheck.rows.length > 0) {
+        return res.status(400).json({ error: "A plan with this description already exists" });
+      }
+    }
+
     // Construir la consulta dinámicamente basada en los campos proporcionados
     let updateFields = [];
     let values = [];
@@ -115,6 +142,15 @@ export const updatePlan = async (req, res) => {
       }
       updateFields.push(`price = $${paramCount}`);
       values.push(price);
+      paramCount++;
+    }
+
+    if (plan_description !== undefined) {
+      if (!plan_description || plan_description.trim() === '') {
+        return res.status(400).json({ error: "Plan description cannot be empty" });
+      }
+      updateFields.push(`plan_description = $${paramCount}`);
+      values.push(plan_description);
       paramCount++;
     }
 
