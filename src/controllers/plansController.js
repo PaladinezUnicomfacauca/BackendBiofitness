@@ -52,15 +52,7 @@ export const createPlan = async (req, res) => {
       return res.status(400).json({ error: "Plan description cannot be empty" });
     }
 
-    // Verificar que no exista un plan con la misma duración
-    const durationCheck = await pool.query(
-      "SELECT id_plan FROM plans WHERE days_duration = $1",
-      [days_duration]
-    );
 
-    if (durationCheck.rows.length > 0) {
-      return res.status(400).json({ error: "A plan with this duration already exists" });
-    }
 
     // Verificar que no exista un plan con la misma descripción
     const descriptionCheck = await pool.query(
@@ -98,17 +90,7 @@ export const updatePlan = async (req, res) => {
       return res.status(404).json({ error: "Plan not found" });
     }
 
-    // Si se está actualizando days_duration, verificar que no esté duplicado
-    if (days_duration) {
-      const durationCheck = await pool.query(
-        "SELECT id_plan FROM plans WHERE days_duration = $1 AND id_plan != $2",
-        [days_duration, id]
-      );
 
-      if (durationCheck.rows.length > 0) {
-        return res.status(400).json({ error: "A plan with this duration already exists" });
-      }
-    }
 
     // Si se está actualizando plan_description, verificar que no esté duplicado
     if (plan_description) {
