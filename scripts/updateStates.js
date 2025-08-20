@@ -1,4 +1,4 @@
-import { pool } from "../src/db/conn.js";
+import { pool } from "./src/db/conn.js";
 
 // Función para calcular el estado y días de mora
 const calculateStateAndArrears = async (expirationDate) => {

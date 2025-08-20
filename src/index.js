@@ -55,7 +55,7 @@ cron.schedule('0 0 * * *', async () => {
   console.log(`[${new Date().toISOString()}] Ejecutando actualización automática de estados de membresías...`);
   try {
     // Importar dinámicamente para evitar problemas de dependencias circulares
-    const { updateAllMembershipStates } = await import('./scripts/updateStates.js');
+    const { updateAllMembershipStates } = await import('../scripts/updateStates.js');
     await updateAllMembershipStates();
     console.log(`[${new Date().toISOString()}] Actualización automática completada exitosamente`);
   } catch (error) {
