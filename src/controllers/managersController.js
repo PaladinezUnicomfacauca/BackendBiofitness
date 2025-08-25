@@ -37,47 +37,104 @@ export const getManagerById = async (req, res) => {
 
 export const createManager = async (req, res) => {
   try {
-    const { name_manager, phone, email, password } = req.body;
-
-    // Validar que el teléfono tenga exactamente 10 dígitos
-    if (!/^\d{10}$/.test(phone)) {
-      return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+    const managers = req.body;
+    const isBatch = Array.isArray(managers);
+    
+    // Si es un solo manager, convertirlo en array para procesarlo uniformemente
+    const managersArray = isBatch ? managers : [managers];
+    
+    // Validar que no esté vacío
+    if (managersArray.length === 0) {
+      return res.status(400).json({ error: "Managers data cannot be empty" });
     }
 
-    // Validar formato de email: debe contener @ y el dominio debe tener 2 o 3 letras
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,3}$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: "Invalid email format. Email must contain '@' and a valid domain (2-3 letters)." });
+    // Validar límite de managers por lote
+    if (managersArray.length > 50) {
+      return res.status(400).json({ error: "Cannot create more than 50 managers at once" });
     }
 
-    // Verificar que el teléfono no esté duplicado
-    const phoneCheck = await pool.query(
-      "SELECT id_manager FROM managers WHERE phone = $1",
-      [phone]
-    );
+    const results = [];
+    const errors = [];
 
-    if (phoneCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Phone number already exists" });
+    for (let i = 0; i < managersArray.length; i++) {
+      const { name_manager, phone, email, password } = managersArray[i];
+
+      try {
+        // Validar campos requeridos
+        if (!name_manager || !phone || !email || !password) {
+          errors.push({ index: i, error: "name_manager, phone, email and password are required" });
+          continue;
+        }
+
+        // Validar que el teléfono tenga exactamente 10 dígitos
+        if (!/^\d{10}$/.test(phone)) {
+          errors.push({ index: i, error: "Phone number must have exactly 10 digits." });
+          continue;
+        }
+
+        // Validar formato de email: debe contener @ y el dominio debe tener 2 o 3 letras
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,3}$/;
+        if (!emailRegex.test(email)) {
+          errors.push({ index: i, error: "Invalid email format. Email must contain '@' and a valid domain (2-3 letters)." });
+          continue;
+        }
+
+        // Verificar que el teléfono no esté duplicado
+        const phoneCheck = await pool.query(
+          "SELECT id_manager FROM managers WHERE phone = $1",
+          [phone]
+        );
+
+        if (phoneCheck.rows.length > 0) {
+          errors.push({ index: i, error: "Phone number already exists" });
+          continue;
+        }
+
+        // Verificar que el email no esté duplicado
+        const emailCheck = await pool.query(
+          "SELECT id_manager FROM managers WHERE email = $1",
+          [email]
+        );
+
+        if (emailCheck.rows.length > 0) {
+          errors.push({ index: i, error: "Email already exists" });
+          continue;
+        }
+
+        // Hashear la contraseña antes de guardar
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const { rows } = await pool.query(
+          "INSERT INTO managers (name_manager, phone, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
+          [name_manager, phone, email, hashedPassword]
+        );
+
+        results.push(rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
     }
 
-    // Verificar que el email no esté duplicado
-    const emailCheck = await pool.query(
-      "SELECT id_manager FROM managers WHERE email = $1",
-      [email]
-    );
-
-    if (emailCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Email already exists" });
+    // Si es un solo manager y no hay errores, devolver solo el manager creado
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
     }
 
-    // Hashear la contraseña antes de guardar
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const { rows } = await pool.query(
-      "INSERT INTO managers (name_manager, phone, email, password) VALUES ($1, $2, $3, $4) RETURNING *",
-      [name_manager, phone, email, hashedPassword]
-    );
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: managersArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
 
-    res.status(201).json(rows[0]);
+    if (results.length > 0) {
+      res.status(201).json(response);
+    } else {
+      res.status(400).json(response);
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

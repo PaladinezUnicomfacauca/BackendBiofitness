@@ -35,41 +35,97 @@ export const getPlanById = async (req, res) => {
 
 export const createPlan = async (req, res) => {
   try {
-    const { days_duration, price, plan_description } = req.body;
-
-    // Validar que days_duration sea un número positivo
-    if (!days_duration || days_duration <= 0) {
-      return res.status(400).json({ error: "Days duration must be a positive number" });
+    const plans = req.body;
+    const isBatch = Array.isArray(plans);
+    
+    // Si es un solo plan, convertirlo en array para procesarlo uniformemente
+    const plansArray = isBatch ? plans : [plans];
+    
+    // Validar que no esté vacío
+    if (plansArray.length === 0) {
+      return res.status(400).json({ error: "Plans data cannot be empty" });
     }
 
-    // Validar que price sea un número positivo
-    if (!price || price <= 0) {
-      return res.status(400).json({ error: "Price must be a positive number" });
+    // Validar límite de planes por lote
+    if (plansArray.length > 50) {
+      return res.status(400).json({ error: "Cannot create more than 50 plans at once" });
     }
 
-    // Validar que plan_description no esté vacío
-    if (!plan_description || plan_description.trim() === '') {
-      return res.status(400).json({ error: "Plan description cannot be empty" });
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < plansArray.length; i++) {
+      const { days_duration, price, plan_description } = plansArray[i];
+
+      try {
+        // Validar campos requeridos
+        if (!days_duration || !price || !plan_description) {
+          errors.push({ index: i, error: "days_duration, price and plan_description are required" });
+          continue;
+        }
+
+        // Validar que days_duration sea un número positivo
+        if (days_duration <= 0) {
+          errors.push({ index: i, error: "Days duration must be a positive number" });
+          continue;
+        }
+
+        // Validar que price sea un número positivo
+        if (price <= 0) {
+          errors.push({ index: i, error: "Price must be a positive number" });
+          continue;
+        }
+
+        // Validar que plan_description no esté vacío
+        if (plan_description.trim() === '') {
+          errors.push({ index: i, error: "Plan description cannot be empty" });
+          continue;
+        }
+
+        // Verificar que no exista un plan con la misma descripción
+        const descriptionCheck = await pool.query(
+          "SELECT id_plan FROM plans WHERE plan_description = $1",
+          [plan_description]
+        );
+
+        if (descriptionCheck.rows.length > 0) {
+          errors.push({ index: i, error: "A plan with this description already exists" });
+          continue;
+        }
+
+        // Insertar plan
+        const { rows } = await pool.query(
+          "INSERT INTO plans (days_duration, price, plan_description) VALUES ($1, $2, $3) RETURNING *",
+          [days_duration, price, plan_description]
+        );
+
+        results.push(rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
     }
 
-
-
-    // Verificar que no exista un plan con la misma descripción
-    const descriptionCheck = await pool.query(
-      "SELECT id_plan FROM plans WHERE plan_description = $1",
-      [plan_description]
-    );
-
-    if (descriptionCheck.rows.length > 0) {
-      return res.status(400).json({ error: "A plan with this description already exists" });
+    // Si es un solo plan y no hay errores, devolver solo el plan creado
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
     }
 
-    const { rows } = await pool.query(
-      "INSERT INTO plans (days_duration, price, plan_description) VALUES ($1, $2, $3) RETURNING *",
-      [days_duration, price, plan_description]
-    );
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: plansArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
 
-    res.status(201).json(rows[0]);
+    if (results.length > 0) {
+      res.status(201).json(response);
+    } else {
+      res.status(400).json(response);
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

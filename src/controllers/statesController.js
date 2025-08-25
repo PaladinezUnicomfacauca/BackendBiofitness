@@ -30,23 +30,79 @@ export const getStateById = async (req, res) => {
 
 export const createState = async (req, res) => {
   try {
-    const { name_state } = req.body;
-    if (!name_state || name_state.trim() === "") {
-      return res.status(400).json({ error: "State name is required" });
+    const states = req.body;
+    const isBatch = Array.isArray(states);
+    
+    // Si es un solo estado, convertirlo en array para procesarlo uniformemente
+    const statesArray = isBatch ? states : [states];
+    
+    // Validar que no esté vacío
+    if (statesArray.length === 0) {
+      return res.status(400).json({ error: "States data cannot be empty" });
     }
-    // Verificar que no exista un estado con el mismo nombre
-    const nameCheck = await pool.query(
-      "SELECT id_state FROM states WHERE name_state = $1",
-      [name_state]
-    );
-    if (nameCheck.rows.length > 0) {
-      return res.status(400).json({ error: "A state with this name already exists" });
+
+    // Validar límite de estados por lote
+    if (statesArray.length > 50) {
+      return res.status(400).json({ error: "Cannot create more than 50 states at once" });
     }
-    const { rows } = await pool.query(
-      "INSERT INTO states (name_state) VALUES ($1) RETURNING *",
-      [name_state]
-    );
-    res.status(201).json(rows[0]);
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < statesArray.length; i++) {
+      const { name_state } = statesArray[i];
+
+      try {
+        // Validar campos requeridos
+        if (!name_state || name_state.trim() === "") {
+          errors.push({ index: i, error: "State name is required" });
+          continue;
+        }
+
+        // Verificar que no exista un estado con el mismo nombre
+        const nameCheck = await pool.query(
+          "SELECT id_state FROM states WHERE name_state = $1",
+          [name_state]
+        );
+
+        if (nameCheck.rows.length > 0) {
+          errors.push({ index: i, error: "A state with this name already exists" });
+          continue;
+        }
+
+        // Insertar estado
+        const { rows } = await pool.query(
+          "INSERT INTO states (name_state) VALUES ($1) RETURNING *",
+          [name_state]
+        );
+
+        results.push(rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
+    }
+
+    // Si es un solo estado y no hay errores, devolver solo el estado creado
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
+    }
+
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: statesArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
+
+    if (results.length > 0) {
+      res.status(201).json(response);
+    } else {
+      res.status(400).json(response);
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

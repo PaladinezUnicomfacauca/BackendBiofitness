@@ -169,117 +169,168 @@ export const getMembershipById = async (req, res) => {
 // Crear una nueva membresía
 export const createMembership = async (req, res) => {
   try {
-    const { id_user, id_plan, id_method, receipt_number } = req.body;
-
-    // Validaciones básicas
-    if (!id_user || !id_plan || !id_method || !receipt_number) {
-      return res.status(400).json({ error: "id_user, id_plan, id_method y receipt_number son requeridos" });
+    const memberships = req.body;
+    const isBatch = Array.isArray(memberships);
+    
+    // Si es una sola membresía, convertirla en array para procesarla uniformemente
+    const membershipsArray = isBatch ? memberships : [memberships];
+    
+    // Validar que no esté vacío
+    if (membershipsArray.length === 0) {
+      return res.status(400).json({ error: "Memberships data cannot be empty" });
     }
 
-    // Verificar que el usuario existe
-    const userResult = await pool.query(
-      "SELECT id_user FROM users WHERE id_user = $1",
-      [id_user]
-    );
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: "User not found" });
+    // Validar límite de membresías por lote
+    if (membershipsArray.length > 50) {
+      return res.status(400).json({ error: "Cannot create more than 50 memberships at once" });
     }
 
-    // Verificar que el receipt_number no esté duplicado
-    const receiptCheck = await pool.query(
-      "SELECT id_membership FROM memberships WHERE receipt_number = $1",
-      [receipt_number]
-    );
-    if (receiptCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Receipt number already exists" });
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < membershipsArray.length; i++) {
+      const { id_user, id_plan, id_method, receipt_number } = membershipsArray[i];
+
+      try {
+        // Validaciones básicas
+        if (!id_user || !id_plan || !id_method || !receipt_number) {
+          errors.push({ index: i, error: "id_user, id_plan, id_method y receipt_number son requeridos" });
+          continue;
+        }
+
+        // Verificar que el usuario existe
+        const userResult = await pool.query(
+          "SELECT id_user FROM users WHERE id_user = $1",
+          [id_user]
+        );
+        if (userResult.rows.length === 0) {
+          errors.push({ index: i, error: "User not found" });
+          continue;
+        }
+
+        // Verificar que el receipt_number no esté duplicado
+        const receiptCheck = await pool.query(
+          "SELECT id_membership FROM memberships WHERE receipt_number = $1",
+          [receipt_number]
+        );
+        if (receiptCheck.rows.length > 0) {
+          errors.push({ index: i, error: "Receipt number already exists" });
+          continue;
+        }
+
+        // 1. Obtener los días de duración del plan
+        const planResult = await pool.query(
+          "SELECT days_duration FROM plans WHERE id_plan = $1",
+          [id_plan]
+        );
+        if (planResult.rows.length === 0) {
+          errors.push({ index: i, error: "Plan not found" });
+          continue;
+        }
+        const daysDuration = planResult.rows[0].days_duration;
+
+        // 3. Calcular la fecha de expiración
+        let expirationDate = new Date();
+        if (daysDuration === 1) {
+          // Para plan de 1 día, la expiración es hoy
+          // (last_payment es hoy por defecto)
+        } else {
+          expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+        }
+        const expirationDateStr = expirationDate.toISOString().split('T')[0];
+
+        // 4. Calcular el estado y días de mora automáticamente
+        const { id_state, days_arrears: calculatedDaysArrears } = await calculateStateAndArrears(expirationDateStr);
+
+        // 5. Insertar la nueva membresía
+        const insertQuery = `
+          INSERT INTO memberships (
+            last_payment,
+            expiration_date,
+            receipt_number,
+            days_arrears,
+            id_user,
+            id_plan,
+            id_method,
+            id_state,
+            id_manager
+          )
+          VALUES (
+            CURRENT_DATE,
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8
+          )
+          RETURNING id_membership, receipt_number
+        `;
+
+        const values = [
+          expirationDateStr,
+          receipt_number,
+          calculatedDaysArrears,
+          id_user,
+          id_plan,
+          id_method,
+          id_state,
+          req.manager.id_manager
+        ];
+
+        const { rows } = await pool.query(insertQuery, values);
+        const newMembershipId = rows[0].id_membership;
+
+        // 6. Obtener la membresía completa para la respuesta
+        const membershipResult = await pool.query(`
+          SELECT m.id_membership,
+            TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
+            TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
+            m.receipt_number, m.days_arrears, m.id_manager, m.id_user, m.id_plan, m.id_method, m.id_state,
+            u.name_user, u.phone AS user_phone, 
+            TO_CHAR(u.created_at, 'YYYY-MM-DD') as user_created_at,
+            p.days_duration, p.price, 
+            pm.name_method, 
+            s.name_state,
+            COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager
+          FROM memberships m
+          JOIN users u ON m.id_user = u.id_user
+          JOIN plans p ON m.id_plan = p.id_plan
+          JOIN payment_methods pm ON m.id_method = pm.id_method
+          JOIN states s ON m.id_state = s.id_state
+          LEFT JOIN managers man ON m.id_manager = man.id_manager
+          WHERE m.id_membership = $1
+        `, [newMembershipId]);
+
+        results.push(membershipResult.rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
     }
 
-    // 1. Obtener los días de duración del plan
-    const planResult = await pool.query(
-      "SELECT days_duration FROM plans WHERE id_plan = $1",
-      [id_plan]
-    );
-    if (planResult.rows.length === 0) {
-      return res.status(404).json({ error: "Plan not found" });
+    // Si es una sola membresía y no hay errores, devolver solo la membresía creada
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
     }
-    const daysDuration = planResult.rows[0].days_duration;
 
-    // 3. Calcular la fecha de expiración
-    let expirationDate = new Date();
-    if (daysDuration === 1) {
-      // Para plan de 1 día, la expiración es hoy
-      // (last_payment es hoy por defecto)
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: membershipsArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
+
+    if (results.length > 0) {
+      res.status(201).json(response);
     } else {
-      expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
+      res.status(400).json(response);
     }
-    const expirationDateStr = expirationDate.toISOString().split('T')[0];
-
-    // 4. Calcular el estado y días de mora automáticamente
-    const { id_state, days_arrears: calculatedDaysArrears } = await calculateStateAndArrears(expirationDateStr);
-
-    // 5. Insertar la nueva membresía
-    const insertQuery = `
-      INSERT INTO memberships (
-        last_payment,
-        expiration_date,
-        receipt_number,
-        days_arrears,
-        id_user,
-        id_plan,
-        id_method,
-        id_state,
-        id_manager
-      )
-      VALUES (
-        CURRENT_DATE,
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        $6,
-        $7,
-        $8
-      )
-      RETURNING id_membership, receipt_number
-    `;
-
-    const values = [
-      expirationDateStr,
-      receipt_number,
-      calculatedDaysArrears,
-      id_user,
-      id_plan,
-      id_method,
-      id_state,
-      req.manager.id_manager
-    ];
-
-    const { rows } = await pool.query(insertQuery, values);
-    const newMembershipId = rows[0].id_membership;
-
-    // 6. Obtener la membresía completa para la respuesta
-    const membershipResult = await pool.query(`
-      SELECT m.id_membership,
-        TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
-        TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
-        m.receipt_number, m.days_arrears, m.id_manager, m.id_user, m.id_plan, m.id_method, m.id_state,
-        u.name_user, u.phone AS user_phone, 
-        TO_CHAR(u.created_at, 'YYYY-MM-DD') as user_created_at,
-        p.days_duration, p.price, 
-        pm.name_method, 
-        s.name_state,
-        COALESCE(man.name_manager, m.manager_name_snapshot) as name_manager 
-      FROM memberships m
-      JOIN users u ON m.id_user = u.id_user
-      LEFT JOIN managers man ON m.id_manager = man.id_manager
-      JOIN plans p ON m.id_plan = p.id_plan
-      JOIN payment_methods pm ON m.id_method = pm.id_method
-      JOIN states s ON m.id_state = s.id_state
-      WHERE m.id_membership = $1
-    `, [newMembershipId]);
-
-    res.status(201).json(membershipResult.rows[0]);
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

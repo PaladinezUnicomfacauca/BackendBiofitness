@@ -30,23 +30,79 @@ export const getPaymentMethodById = async (req, res) => {
 
 export const createPaymentMethod = async (req, res) => {
   try {
-    const { name_method } = req.body;
-    if (!name_method || name_method.trim() === "") {
-      return res.status(400).json({ error: "Payment method name is required" });
+    const paymentMethods = req.body;
+    const isBatch = Array.isArray(paymentMethods);
+    
+    // Si es un solo método, convertirlo en array para procesarlo uniformemente
+    const methodsArray = isBatch ? paymentMethods : [paymentMethods];
+    
+    // Validar que no esté vacío
+    if (methodsArray.length === 0) {
+      return res.status(400).json({ error: "Payment methods data cannot be empty" });
     }
-    // Verificar que no exista un método con el mismo nombre
-    const nameCheck = await pool.query(
-      "SELECT id_method FROM payment_methods WHERE name_method = $1",
-      [name_method]
-    );
-    if (nameCheck.rows.length > 0) {
-      return res.status(400).json({ error: "A payment method with this name already exists" });
+
+    // Validar límite de métodos por lote
+    if (methodsArray.length > 50) {
+      return res.status(400).json({ error: "Cannot create more than 50 payment methods at once" });
     }
-    const { rows } = await pool.query(
-      "INSERT INTO payment_methods (name_method) VALUES ($1) RETURNING *",
-      [name_method]
-    );
-    res.status(201).json(rows[0]);
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < methodsArray.length; i++) {
+      const { name_method } = methodsArray[i];
+
+      try {
+        // Validar campos requeridos
+        if (!name_method || name_method.trim() === "") {
+          errors.push({ index: i, error: "Payment method name is required" });
+          continue;
+        }
+
+        // Verificar que no exista un método con el mismo nombre
+        const nameCheck = await pool.query(
+          "SELECT id_method FROM payment_methods WHERE name_method = $1",
+          [name_method]
+        );
+
+        if (nameCheck.rows.length > 0) {
+          errors.push({ index: i, error: "A payment method with this name already exists" });
+          continue;
+        }
+
+        // Insertar método de pago
+        const { rows } = await pool.query(
+          "INSERT INTO payment_methods (name_method) VALUES ($1) RETURNING *",
+          [name_method]
+        );
+
+        results.push(rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
+    }
+
+    // Si es un solo método y no hay errores, devolver solo el método creado
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
+    }
+
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: methodsArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
+
+    if (results.length > 0) {
+      res.status(201).json(response);
+    } else {
+      res.status(400).json(response);
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

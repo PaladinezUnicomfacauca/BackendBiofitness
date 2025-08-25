@@ -66,29 +66,85 @@ export const getUserById = async (req, res) => {
 
 export const createUser = async (req, res) => {
   try {
-    const { name_user, phone } = req.body;
-
-    // Validar que el teléfono tenga exactamente 10 dígitos
-    if (!/^\d{10}$/.test(phone)) {
-      return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+    const users = req.body;
+    const isBatch = Array.isArray(users);
+    
+    // Si es un solo usuario, convertirlo en array para procesarlo uniformemente
+    const usersArray = isBatch ? users : [users];
+    
+    // Validar que no esté vacío
+    if (usersArray.length === 0) {
+      return res.status(400).json({ error: "Users data cannot be empty" });
     }
 
-    // Verificar que el teléfono no esté duplicado
-    const phoneCheck = await pool.query(
-      "SELECT id_user FROM users WHERE phone = $1",
-      [phone]
-    );
-
-    if (phoneCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Phone number already exists" });
+    // Validar límite de usuarios por lote
+    if (usersArray.length > 100) {
+      return res.status(400).json({ error: "Cannot create more than 100 users at once" });
     }
 
-    const { rows } = await pool.query(
-      "INSERT INTO users (name_user, phone) VALUES ($1, $2) RETURNING *",
-      [name_user, phone]
-    );
+    const results = [];
+    const errors = [];
 
-    res.status(201).json(rows[0]);
+    for (let i = 0; i < usersArray.length; i++) {
+      const { name_user, phone } = usersArray[i];
+
+      try {
+        // Validar campos requeridos
+        if (!name_user || !phone) {
+          errors.push({ index: i, error: "name_user and phone are required" });
+          continue;
+        }
+
+        // Validar que el teléfono tenga exactamente 10 dígitos
+        if (!/^\d{10}$/.test(phone)) {
+          errors.push({ index: i, error: "Phone number must have exactly 10 digits." });
+          continue;
+        }
+
+        // Verificar que el teléfono no esté duplicado
+        const phoneCheck = await pool.query(
+          "SELECT id_user FROM users WHERE phone = $1",
+          [phone]
+        );
+
+        if (phoneCheck.rows.length > 0) {
+          errors.push({ index: i, error: "Phone number already exists" });
+          continue;
+        }
+
+        // Insertar usuario
+        const { rows } = await pool.query(
+          "INSERT INTO users (name_user, phone) VALUES ($1, $2) RETURNING *",
+          [name_user, phone]
+        );
+
+        results.push(rows[0]);
+      } catch (error) {
+        errors.push({ index: i, error: error.message });
+      }
+    }
+
+    // Si es un solo usuario y no hay errores, devolver solo el usuario creado
+    if (!isBatch && results.length === 1 && errors.length === 0) {
+      return res.status(201).json(results[0]);
+    }
+
+    // Para lotes o cuando hay errores, devolver respuesta detallada
+    const response = {
+      created: results,
+      errors: errors,
+      summary: {
+        total: usersArray.length,
+        successful: results.length,
+        failed: errors.length
+      }
+    };
+
+    if (results.length > 0) {
+      res.status(201).json(response);
+    } else {
+      res.status(400).json(response);
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
