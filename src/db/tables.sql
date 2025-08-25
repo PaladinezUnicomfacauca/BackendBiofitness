@@ -27,8 +27,7 @@ CREATE TABLE users (
     id_user SERIAL PRIMARY KEY,
     name_user VARCHAR(40) NOT NULL,
     phone VARCHAR(10) UNIQUE NOT NULL,
-    created_at DATE DEFAULT CURRENT_DATE,
-    updated_at DATE DEFAULT CURRENT_DATE
+    created_at DATE DEFAULT CURRENT_DATE
 );
 
 CREATE TABLE memberships (

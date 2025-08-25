@@ -29,8 +29,7 @@ export const getUsers = async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT id_user, name_user, phone, 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
-        TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users
       ORDER BY id_user DESC
     `);
@@ -50,8 +49,7 @@ export const getUserById = async (req, res) => {
     
     const { rows } = await pool.query(`
       SELECT id_user, name_user, phone, 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
-        TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users 
       WHERE id_user = $1
     `, [id]);
@@ -144,11 +142,10 @@ export const updateUser = async (req, res) => {
       paramCount++;
     }
 
-    updateFields.push(`updated_at = CURRENT_DATE`);
     values.push(id);
 
     const { rows } = await pool.query(
-      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at, TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at`,
+      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at`,
       values
     );
 
@@ -423,8 +420,7 @@ export const getUsersWithActiveMemberships = async (req, res) => {
   try {
     const { rows: users } = await pool.query(`
       SELECT id_user, name_user, phone, 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
-        TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users
       ORDER BY id_user DESC
     `);
@@ -456,8 +452,7 @@ export const getUserByIdWithActiveMembership = async (req, res) => {
     
     const { rows } = await pool.query(`
       SELECT id_user, name_user, phone, 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
-        TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+        TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users 
       WHERE id_user = $1
     `, [id]);
@@ -581,7 +576,7 @@ export const updateUserWithMembership = async (req, res) => {
       // 1. Actualizar el usuario
       await client.query(`
         UPDATE users 
-        SET name_user = $1, phone = $2, updated_at = CURRENT_DATE
+        SET name_user = $1, phone = $2
         WHERE id_user = $3
       `, [name_user, phone, userId]);
 
@@ -663,8 +658,7 @@ export const updateUserWithMembership = async (req, res) => {
       // Obtener datos actualizados del usuario
       const updatedUserResult = await client.query(`
         SELECT id_user, name_user, phone, 
-          TO_CHAR(created_at, 'YYYY-MM-DD') as created_at,
-          TO_CHAR(updated_at, 'YYYY-MM-DD') as updated_at
+          TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
         FROM users 
         WHERE id_user = $1
       `, [userId]);
