@@ -214,16 +214,47 @@ export const updateUser = async (req, res) => {
 export const deleteUser = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { rowCount } = await pool.query(
-      "DELETE FROM users WHERE id_user = $1",
+    
+    // Verificar que el usuario existe
+    const userCheck = await pool.query(
+      "SELECT id_user FROM users WHERE id_user = $1",
       [id]
     );
-
-    if (rowCount === 0) {
+    
+    if (userCheck.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    return res.sendStatus(204);
+    // Iniciar transacción para eliminar membresías primero y luego el usuario
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Eliminar todas las membresías del usuario
+      await client.query(
+        "DELETE FROM memberships WHERE id_user = $1",
+        [id]
+      );
+
+      // 2. Eliminar el usuario
+      const { rowCount } = await client.query(
+        "DELETE FROM users WHERE id_user = $1",
+        [id]
+      );
+
+      if (rowCount === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      await client.query('COMMIT');
+      return res.sendStatus(204);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

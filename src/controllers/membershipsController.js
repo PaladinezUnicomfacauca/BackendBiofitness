@@ -102,7 +102,7 @@ export const getMemberships = async (req, res) => {
       JOIN plans p ON m.id_plan = p.id_plan
       JOIN payment_methods pm ON m.id_method = pm.id_method
       JOIN states s ON m.id_state = s.id_state
-      ORDER BY m.id_membership ASC
+      ORDER BY m.id_membership DESC
     `);
     return res.status(200).json(rows);
   } catch (error) {
@@ -522,7 +522,7 @@ export const exportMembershipsToExcel = async (req, res) => {
       query += ` WHERE ${conditions.join(' AND ')}`;
     }
     
-    query += ` ORDER BY m.id_membership ASC`;
+    query += ` ORDER BY m.id_membership DESC`;
     
     // Ejecutar la consulta
     const { rows } = await pool.query(query, params);
