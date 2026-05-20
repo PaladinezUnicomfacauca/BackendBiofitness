@@ -17,7 +17,7 @@ export const getManagerById = async (req, res) => {
     
     // Validar que el ID sea un número válido
     if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid manager ID" });
+      return res.status(400).json({ error: "ID de administrador inválido" });
     }
 
     const { rows } = await pool.query(
@@ -26,12 +26,12 @@ export const getManagerById = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: "Manager not found" });
+      return res.status(404).json({ error: "Administrador no encontrado" });
     }
 
     return res.status(200).json(rows[0]);
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: "Error al obtener los administradores" });
   }
 };
 
@@ -45,12 +45,12 @@ export const createManager = async (req, res) => {
     
     // Validar que no esté vacío
     if (managersArray.length === 0) {
-      return res.status(400).json({ error: "Managers data cannot be empty" });
+      return res.status(400).json({ error: "Los datos de los administradores no pueden estar vacíos" });
     }
 
     // Validar límite de managers por lote
     if (managersArray.length > 50) {
-      return res.status(400).json({ error: "Cannot create more than 50 managers at once" });
+      return res.status(400).json({ error: "No se puede crear más de 50 administradores a la vez" });
     }
 
     const results = [];
@@ -62,13 +62,13 @@ export const createManager = async (req, res) => {
       try {
         // Validar campos requeridos
         if (!name_manager || !phone || !email || !password) {
-          errors.push({ index: i, error: "name_manager, phone, email and password are required" });
+          errors.push({ index: i, error: "Nombre, teléfono, email y contraseña son requeridos" });
           continue;
         }
 
         // Validar que el teléfono tenga exactamente 10 dígitos
         if (!/^\d{10}$/.test(phone)) {
-          errors.push({ index: i, error: "Phone number must have exactly 10 digits." });
+          errors.push({ index: i, error: "El teléfono debe tener exactamente 10 dígitos." });
           continue;
         }
 
@@ -136,7 +136,7 @@ export const createManager = async (req, res) => {
       res.status(400).json(response);
     }
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: "Error al crear el administrador" });
   }
 };
 
@@ -152,7 +152,7 @@ export const updateManager = async (req, res) => {
     );
 
     if (managerCheck.rows.length === 0) {
-      return res.status(404).json({ error: "Manager not found" });
+      return res.status(404).json({ error: "Administrador no encontrado" });
     }
 
     // Si se va a cambiar la contraseña, validar la contraseña actual
@@ -170,7 +170,7 @@ export const updateManager = async (req, res) => {
     // Si se está actualizando el teléfono, validar que tenga exactamente 10 dígitos
     if (phone !== undefined) {
       if (!/^\d{10}$/.test(phone)) {
-        return res.status(400).json({ error: "Phone number must have exactly 10 digits." });
+        return res.status(400).json({ error: "El teléfono debe tener exactamente 10 dígitos." });
       }
       // Verificar que no esté duplicado
       const phoneCheck = await pool.query(
@@ -178,7 +178,7 @@ export const updateManager = async (req, res) => {
         [phone, id]
       );
       if (phoneCheck.rows.length > 0) {
-        return res.status(400).json({ error: "Phone number already exists" });
+        return res.status(400).json({ error: "El teléfono ya existe" });
       }
     }
 
@@ -186,7 +186,7 @@ export const updateManager = async (req, res) => {
     if (email !== undefined) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,3}$/;
       if (!emailRegex.test(email)) {
-        return res.status(400).json({ error: "Invalid email format. Email must contain '@' and a valid domain (2-3 letters)." });
+        return res.status(400).json({ error: "Formato de email inválido. El email debe contener '@' y un dominio válido (2-3 letras)." });
       }
     }
 
@@ -198,7 +198,7 @@ export const updateManager = async (req, res) => {
       );
 
       if (emailCheck.rows.length > 0) {
-        return res.status(400).json({ error: "Email already exists" });
+        return res.status(400).json({ error: "El email ya existe" });
       }
     }
 
@@ -242,7 +242,7 @@ export const updateManager = async (req, res) => {
 
     return res.json(rows[0]);
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: "Error al actualizar el administrador" });
   }
 };
 
@@ -256,7 +256,7 @@ export const deleteManager = async (req, res) => {
       [id]
     );
     if (managerResult.rows.length === 0) {
-      return res.status(404).json({ message: "Manager not found" });
+      return res.status(404).json({ message: "Administrador no encontrado" });
     }
     const managerName = managerResult.rows[0].name_manager;
 
@@ -275,12 +275,12 @@ export const deleteManager = async (req, res) => {
     );
 
     if (rowCount === 0) {
-      return res.status(404).json({ message: "Manager not found" });
+      return res.status(404).json({ message: "Administrador no encontrado" });
     }
 
     return res.sendStatus(204);
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: "Error al eliminar el administrador" });
   }
 };
 
@@ -288,7 +288,7 @@ export const loginManager = async (req, res) => {
   try {
     const { name_manager, password } = req.body;
     if (!name_manager || !password) {
-      return res.status(400).json({ error: "Name and password are required" });
+      return res.status(400).json({ error: "Nombre y contraseña son requeridos" });
     }
     // Buscar manager por name_manager
     const { rows } = await pool.query(
@@ -296,13 +296,13 @@ export const loginManager = async (req, res) => {
       [name_manager]
     );
     if (rows.length === 0) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Credenciales incorrectas" });
     }
     const manager = rows[0];
     // Comparar contraseña
     const passwordMatch = await bcrypt.compare(password, manager.password);
     if (!passwordMatch) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return res.status(401).json({ error: "Contraseña incorrecta" });
     }
     // Generar JWT
     const token = jwt.sign(
@@ -320,6 +320,6 @@ export const loginManager = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: "Error al iniciar sesión" });
   }
 };

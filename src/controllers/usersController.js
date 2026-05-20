@@ -1,4 +1,10 @@
 import { pool } from "../db/conn.js";
+import { uploadFaceImage, deleteFaceImageByPublicId } from "../utils/uploadFace.js";
+import { calculateStateAndArrears } from "../utils/membershipState.js";
+import {
+  bulkDeleteUsersWithArrearsAndOrphans,
+  DEFAULT_ARREARS_THRESHOLD,
+} from "../utils/userCleanup.js";
 
 // Función helper para obtener la membresía activa de un usuario
 const getActiveMembership = async (userId) => {
@@ -28,7 +34,7 @@ const getActiveMembership = async (userId) => {
 export const getUsers = async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT id_user, name_user, phone, 
+      SELECT id_user, name_user, phone, face,
         TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users
       ORDER BY id_user DESC
@@ -48,7 +54,7 @@ export const getUserById = async (req, res) => {
     }
     
     const { rows } = await pool.query(`
-      SELECT id_user, name_user, phone, 
+      SELECT id_user, name_user, phone, face,
         TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users 
       WHERE id_user = $1
@@ -201,7 +207,7 @@ export const updateUser = async (req, res) => {
     values.push(id);
 
     const { rows } = await pool.query(
-      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING id_user, name_user, phone, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at`,
+      `UPDATE users SET ${updateFields.join(', ')} WHERE id_user = $${paramCount} RETURNING id_user, name_user, phone, face, TO_CHAR(created_at, 'YYYY-MM-DD') as created_at`,
       values
     );
 
@@ -211,70 +217,17 @@ export const updateUser = async (req, res) => {
   }
 };
 
-export const deleteUser = async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    
-    // Verificar que el usuario existe
-    const userCheck = await pool.query(
-      "SELECT id_user FROM users WHERE id_user = $1",
-      [id]
-    );
-    
-    if (userCheck.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Iniciar transacción para eliminar membresías primero y luego el usuario
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // 1. Eliminar todas las membresías del usuario
-      await client.query(
-        "DELETE FROM memberships WHERE id_user = $1",
-        [id]
-      );
-
-      // 2. Eliminar el usuario
-      const { rowCount } = await client.query(
-        "DELETE FROM users WHERE id_user = $1",
-        [id]
-      );
-
-      if (rowCount === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      await client.query('COMMIT');
-      return res.sendStatus(204);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-};
-
-// Crear usuario con membresía en una sola transacción (VERSIÓN ORIGINAL - COMENTADA)
-/*
 export const createUserWithMembership = async (req, res) => {
   try {
-    const { 
-      name_user, 
-      phone, 
-      id_plan, 
-      id_method, 
-      id_manager,
-      receipt_number
-    } = req.body;
+    const name_user = (req.body.name_user ?? "").trim();
+    const phone = (req.body.phone ?? "").trim();
+    const receipt_number = (req.body.receipt_number ?? "").trim();
+    const id_plan = parseInt(req.body.id_plan, 10);
+    const id_method = parseInt(req.body.id_method, 10);
+    const id_manager = parseInt(req.body.id_manager, 10);
 
     // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method || !id_manager || !receipt_number) {
+    if (!name_user || !phone || !receipt_number || Number.isNaN(id_plan) || Number.isNaN(id_method) || Number.isNaN(id_manager)) {
       return res.status(400).json({ 
         error: "name_user, phone, id_plan, id_method, id_manager y receipt_number son requeridos" 
       });
@@ -286,7 +239,7 @@ export const createUserWithMembership = async (req, res) => {
       [phone]
     );
     if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: "Phone number already exists" });
+      return res.status(400).json({ error: "El número de teléfono ya existe" });
     }
 
     // Verificar que el receipt_number no esté duplicado
@@ -295,18 +248,19 @@ export const createUserWithMembership = async (req, res) => {
       [receipt_number]
     );
     if (receiptCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Receipt number already exists" });
+      return res.status(400).json({ error: "El número de recibo ya existe" });
     }
 
     // Verificar que el plan existe
     const planResult = await pool.query(
-      "SELECT days_duration FROM plans WHERE id_plan = $1",
+      "SELECT days_duration, price FROM plans WHERE id_plan = $1",
       [id_plan]
     );
     if (planResult.rows.length === 0) {
       return res.status(404).json({ error: "Plan not found" });
     }
     const daysDuration = planResult.rows[0].days_duration;
+    const planPrice = planResult.rows[0].price;
 
     // Verificar que el método de pago existe
     const methodResult = await pool.query(
@@ -326,6 +280,20 @@ export const createUserWithMembership = async (req, res) => {
       return res.status(404).json({ error: "Manager not found" });
     }
 
+    let faceUrl = null;
+    let facePublicId = null;
+    if (req.file) {
+      try {
+        const uploadResult = await uploadFaceImage(req.file.buffer, req.file.mimetype);
+        faceUrl = uploadResult.secure_url;
+        facePublicId = uploadResult.public_id;
+      } catch (uploadErr) {
+        return res.status(400).json({
+          error: uploadErr.message || "No se pudo subir la foto del rostro",
+        });
+      }
+    }
+
     // Iniciar transacción
     const client = await pool.connect();
     try {
@@ -333,10 +301,10 @@ export const createUserWithMembership = async (req, res) => {
 
       // 1. Crear el usuario
       const userResult = await client.query(`
-        INSERT INTO users (name_user, phone)
-        VALUES ($1, $2)
+        INSERT INTO users (name_user, phone, face, face_public_id)
+        VALUES ($1, $2, $3, $4)
         RETURNING id_user
-      `, [name_user, phone]);
+      `, [name_user, phone, faceUrl, facePublicId]);
       
       const userId = userResult.rows[0].id_user;
 
@@ -347,7 +315,7 @@ export const createUserWithMembership = async (req, res) => {
       );
       if (receiptCheckInTransaction.rows.length > 0) {
         await client.query('ROLLBACK');
-        return res.status(400).json({ error: "Receipt number already exists" });
+        return res.status(400).json({ error: "El número de recibo ya existe" });
       }
 
       // 3. Calcular fecha de expiración
@@ -356,40 +324,32 @@ export const createUserWithMembership = async (req, res) => {
       const expirationDateStr = expirationDate.toISOString().split('T')[0];
 
       // 4. Calcular estado y días de mora
-      const today = new Date();
-      const expiration = new Date(expirationDateStr);
-      const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-      
-      let stateName;
-      let daysArrears = 0;
-      
-      if (daysUntilExpiration > 5) {
-        stateName = "Vigente";
-      } else if (daysUntilExpiration >= 0) {
-        stateName = "Por vencer";
-      } else {
-        stateName = "Vencido";
-        daysArrears = Math.abs(daysUntilExpiration);
-      }
-      
-      const stateResult = await client.query(
-        "SELECT id_state FROM states WHERE name_state = $1",
-        [stateName]
+      const { id_state, days_arrears: daysArrears } = await calculateStateAndArrears(
+        expirationDateStr,
+        client
       );
-      
-      if (stateResult.rows.length === 0) {
-        throw new Error(`State '${stateName}' not found in database`);
-      }
-      
-      const id_state = stateResult.rows[0].id_state;
 
-      // 5. Crear la membresía
+      // 5. Calcular pago y deuda
+      let pay = req.body.pay !== undefined ? parseInt(req.body.pay, 10) : planPrice;
+      if (isNaN(pay) || pay < 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: "El valor de pago es inválido" });
+      }
+      if (pay > planPrice) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: "El pago no puede ser mayor al precio del plan" });
+      }
+      const owe = planPrice - pay;
+
+      // 6. Crear la membresía
       const membershipResult = await client.query(`
         INSERT INTO memberships (
           last_payment,
           expiration_date,
           receipt_number,
           days_arrears,
+          pay,
+          owe,
           id_user,
           id_plan,
           id_method,
@@ -405,226 +365,17 @@ export const createUserWithMembership = async (req, res) => {
           $5,
           $6,
           $7,
-          $8
-        )
-        RETURNING id_membership, receipt_number
-      `, [
-        expirationDateStr,
-        receipt_number,
-        daysArrears,
-        userId,
-        id_plan,
-        id_method,
-        id_state,
-        req.manager.id_manager
-      ]);
-      
-      const membershipId = membershipResult.rows[0].id_membership;
-
-      // 6. Obtener datos completos para la respuesta
-      const finalResult = await client.query(`
-        SELECT 
-          u.id_user,
-          u.name_user,
-          u.phone,
-          m.id_membership,
-          TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
-          TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
-          m.receipt_number,
-          m.days_arrears,
-          p.days_duration,
-          p.price,
-          pm.name_method,
-          s.name_state,
-          man.name_manager
-        FROM users u
-        JOIN memberships m ON u.id_user = m.id_user
-        JOIN plans p ON m.id_plan = p.id_plan
-        JOIN payment_methods pm ON m.id_method = pm.id_method
-        JOIN states s ON m.id_state = s.id_state
-        JOIN managers man ON m.id_manager = man.id_manager
-        WHERE u.id_user = $1 AND m.id_membership = $2
-      `, [userId, membershipId]);
-
-      await client.query('COMMIT');
-      
-      res.status(201).json(finalResult.rows[0]);
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-};
-*/
-
-// Crear usuario con membresía en una sola transacción (NUEVA VERSIÓN CON FECHAS)
-export const createUserWithMembership = async (req, res) => {
-  try {
-    const { 
-      name_user, 
-      phone, 
-      id_plan, 
-      id_method, 
-      id_manager,
-      receipt_number,
-      registration_date,  // Nueva fecha de inscripción
-      last_payment_date   // Nueva fecha de último pago
-    } = req.body;
-
-    // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method || !id_manager || !receipt_number) {
-      return res.status(400).json({ 
-        error: "name_user, phone, id_plan, id_method, id_manager y receipt_number son requeridos" 
-      });
-    }
-
-    // Verificar que el teléfono no exista
-    const existingUser = await pool.query(
-      "SELECT id_user FROM users WHERE phone = $1",
-      [phone]
-    );
-    if (existingUser.rows.length > 0) {
-      return res.status(400).json({ error: "Phone number already exists" });
-    }
-
-    // Verificar que el receipt_number no esté duplicado
-    const receiptCheck = await pool.query(
-      "SELECT id_membership FROM memberships WHERE receipt_number = $1",
-      [receipt_number]
-    );
-    if (receiptCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Receipt number already exists" });
-    }
-
-    // Verificar que el plan existe
-    const planResult = await pool.query(
-      "SELECT days_duration FROM plans WHERE id_plan = $1",
-      [id_plan]
-    );
-    if (planResult.rows.length === 0) {
-      return res.status(404).json({ error: "Plan not found" });
-    }
-    const daysDuration = planResult.rows[0].days_duration;
-
-    // Verificar que el método de pago existe
-    const methodResult = await pool.query(
-      "SELECT id_method FROM payment_methods WHERE id_method = $1",
-      [id_method]
-    );
-    if (methodResult.rows.length === 0) {
-      return res.status(404).json({ error: "Payment method not found" });
-    }
-
-    // Verificar que el manager existe
-    const managerResult = await pool.query(
-      "SELECT id_manager FROM managers WHERE id_manager = $1",
-      [id_manager]
-    );
-    if (managerResult.rows.length === 0) {
-      return res.status(404).json({ error: "Manager not found" });
-    }
-
-    // Iniciar transacción
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      // 1. Crear el usuario con fecha de inscripción personalizada
-      const userResult = await client.query(`
-        INSERT INTO users (name_user, phone, created_at)
-        VALUES ($1, $2, $3)
-        RETURNING id_user
-      `, [
-        name_user, 
-        phone, 
-        registration_date || new Date() // Usar fecha personalizada o fecha actual
-      ]);
-      
-      const userId = userResult.rows[0].id_user;
-
-      // 2. Verificar nuevamente que el receipt_number no esté duplicado (dentro de la transacción)
-      const receiptCheckInTransaction = await client.query(
-        "SELECT id_membership FROM memberships WHERE receipt_number = $1",
-        [receipt_number]
-      );
-      if (receiptCheckInTransaction.rows.length > 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: "Receipt number already exists" });
-      }
-
-      // 3. Calcular fecha de expiración basada en la fecha de último pago
-      let expirationDate;
-      if (last_payment_date) {
-        expirationDate = new Date(last_payment_date);
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-      } else {
-        expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-      }
-      const expirationDateStr = expirationDate.toISOString().split('T')[0];
-
-      // 4. Calcular estado y días de mora
-      const today = new Date();
-      const expiration = new Date(expirationDateStr);
-      const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-      
-      let stateName;
-      let daysArrears = 0;
-      
-      if (daysUntilExpiration > 5) {
-        stateName = "Vigente";
-      } else if (daysUntilExpiration >= 0) {
-        stateName = "Por vencer";
-      } else {
-        stateName = "Vencido";
-        daysArrears = Math.abs(daysUntilExpiration);
-      }
-      
-      const stateResult = await client.query(
-        "SELECT id_state FROM states WHERE name_state = $1",
-        [stateName]
-      );
-      
-      if (stateResult.rows.length === 0) {
-        throw new Error(`State '${stateName}' not found in database`);
-      }
-      
-      const id_state = stateResult.rows[0].id_state;
-
-      // 5. Crear la membresía con fecha de último pago personalizada
-      const membershipResult = await client.query(`
-        INSERT INTO memberships (
-          last_payment,
-          expiration_date,
-          receipt_number,
-          days_arrears,
-          id_user,
-          id_plan,
-          id_method,
-          id_state,
-          id_manager
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
           $8,
-          $9
+          $9,
+          $10
         )
         RETURNING id_membership, receipt_number
       `, [
-        last_payment_date || new Date(), // Usar fecha personalizada o fecha actual
         expirationDateStr,
         receipt_number,
         daysArrears,
+        pay,
+        owe,
         userId,
         id_plan,
         id_method,
@@ -634,18 +385,20 @@ export const createUserWithMembership = async (req, res) => {
       
       const membershipId = membershipResult.rows[0].id_membership;
 
-      // 6. Obtener datos completos para la respuesta
+      // 7. Obtener datos completos para la respuesta
       const finalResult = await client.query(`
         SELECT 
           u.id_user,
           u.name_user,
           u.phone,
-          TO_CHAR(u.created_at, 'YYYY-MM-DD') as registration_date,
+          u.face,
           m.id_membership,
           TO_CHAR(m.last_payment, 'YYYY-MM-DD') as last_payment,
           TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
           m.receipt_number,
           m.days_arrears,
+          m.pay,
+          m.owe,
           p.days_duration,
           p.price,
           pm.name_method,
@@ -670,6 +423,10 @@ export const createUserWithMembership = async (req, res) => {
       client.release();
     }
   } catch (error) {
+    console.error("[createUserWithMembership] Error:", error.message);
+    if (error.message?.includes("columna") || error.code) {
+      console.error("[createUserWithMembership] Detalle DB:", error.code, error.detail || "");
+    }
     return res.status(500).json({ error: error.message });
   }
 };
@@ -697,6 +454,8 @@ export const getUserMemberships = async (req, res) => {
         TO_CHAR(m.expiration_date, 'YYYY-MM-DD') as expiration_date,
         m.receipt_number,
         m.days_arrears,
+        m.pay,
+        m.owe,
         p.days_duration,
         p.price,
         pm.name_method,
@@ -721,7 +480,7 @@ export const getUserMemberships = async (req, res) => {
 export const getUsersWithActiveMemberships = async (req, res) => {
   try {
     const { rows: users } = await pool.query(`
-      SELECT id_user, name_user, phone, 
+      SELECT id_user, name_user, phone, face,
         TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users
       ORDER BY id_user DESC
@@ -753,7 +512,7 @@ export const getUserByIdWithActiveMembership = async (req, res) => {
     }
     
     const { rows } = await pool.query(`
-      SELECT id_user, name_user, phone, 
+      SELECT id_user, name_user, phone, face,
         TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
       FROM users 
       WHERE id_user = $1
@@ -775,8 +534,7 @@ export const getUserByIdWithActiveMembership = async (req, res) => {
   }
 };
 
-// Actualizar usuario con membresía en una sola transacción (VERSIÓN ORIGINAL - COMENTADA)
-/*
+
 export const updateUserWithMembership = async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
@@ -827,13 +585,14 @@ export const updateUserWithMembership = async (req, res) => {
 
     // Verificar que el plan existe
     const planResult = await pool.query(
-      "SELECT days_duration FROM plans WHERE id_plan = $1",
+      "SELECT days_duration, price FROM plans WHERE id_plan = $1",
       [id_plan]
     );
     if (planResult.rows.length === 0) {
       return res.status(404).json({ error: "Plan not found" });
     }
     const daysDuration = planResult.rows[0].days_duration;
+    const planPrice = planResult.rows[0].price;
 
     // Verificar que el método de pago existe
     const methodResult = await pool.query(
@@ -885,7 +644,7 @@ export const updateUserWithMembership = async (req, res) => {
 
       // 2. Obtener la membresía activa/más reciente
       const currentMembership = await client.query(`
-        SELECT id_membership, id_state
+        SELECT id_membership, id_state, pay, owe
         FROM memberships 
         WHERE id_user = $1 
         ORDER BY id_membership DESC 
@@ -905,35 +664,31 @@ export const updateUserWithMembership = async (req, res) => {
       expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
       const expirationDateStr = expirationDate.toISOString().split('T')[0];
 
-      // Calcular estado y días de mora
-      const today = new Date();
-      const expiration = new Date(expirationDateStr);
-      const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-      
-      let stateName;
-      let daysArrears = 0;
-      
-      if (daysUntilExpiration > 5) {
-        stateName = "Vigente";
-      } else if (daysUntilExpiration >= 0) {
-        stateName = "Por vencer";
-      } else {
-        stateName = "Vencido";
-        daysArrears = Math.abs(daysUntilExpiration);
-      }
-      
-      const stateResult = await client.query(
-        "SELECT id_state FROM states WHERE name_state = $1",
-        [stateName]
+      const { id_state, days_arrears: daysArrears } = await calculateStateAndArrears(
+        expirationDateStr,
+        client
       );
-      
-      if (stateResult.rows.length === 0) {
-        throw new Error(`State '${stateName}' not found in database`);
-      }
-      
-      const id_state = stateResult.rows[0].id_state;
 
-      // Actualizar la membresía
+      // Calcular pay y owe
+      let payValue;
+      if (req.body.pay !== undefined) {
+        const parsedPay = parseInt(req.body.pay, 10);
+        if (isNaN(parsedPay) || parsedPay < 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: "El valor de pago es inválido" });
+        }
+        if (parsedPay > planPrice) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: "El pago no puede ser mayor al precio del plan" });
+        }
+        payValue = parsedPay;
+      } else {
+        const prevPay = currentMembership.rows[0].pay;
+        payValue = (prevPay === null || prevPay === undefined) ? planPrice : prevPay;
+      }
+      const oweValue = Math.max(0, planPrice - payValue);
+
+      // Actualizar la membresía incluyendo pay/owe
       await client.query(`
         UPDATE memberships 
         SET last_payment = CURRENT_DATE,
@@ -943,8 +698,10 @@ export const updateUserWithMembership = async (req, res) => {
             id_plan = $4,
             id_method = $5,
             id_state = $6,
-            id_manager = $7
-        WHERE id_membership = $8
+            id_manager = $7,
+            pay = $8,
+            owe = $9
+        WHERE id_membership = $10
       `, [
         expirationDateStr,
         receipt_number,
@@ -953,6 +710,8 @@ export const updateUserWithMembership = async (req, res) => {
         id_method,
         id_state,
         finalManagerId,
+        payValue,
+        oweValue,
         membershipId
       ]);
 
@@ -960,7 +719,7 @@ export const updateUserWithMembership = async (req, res) => {
       
       // Obtener datos actualizados del usuario
       const updatedUserResult = await client.query(`
-        SELECT id_user, name_user, phone, 
+        SELECT id_user, name_user, phone, face,
           TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
         FROM users 
         WHERE id_user = $1
@@ -980,219 +739,66 @@ export const updateUserWithMembership = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
-*/
 
-// Actualizar usuario con membresía en una sola transacción (NUEVA VERSIÓN CON FECHAS)
-export const updateUserWithMembership = async (req, res) => {
+/**
+ * Elimina usuarios y sus membresías cuando alguna membresía tiene days_arrears > 20.
+ * También elimina usuarios huérfanos (sin ninguna membresía).
+ * SQL en lote; fotos en Cloudinary se eliminan después (API externa).
+ */
+export const deleteUsersWithArrearsOverThreshold = async () => {
+  const client = await pool.connect();
   try {
-    const userId = parseInt(req.params.id);
-    const { 
-      name_user, 
-      phone, 
-      id_plan, 
-      id_method, 
-      id_manager,
-      receipt_number,
-      registration_date,  // Nueva fecha de inscripción
-      last_payment_date   // Nueva fecha de último pago
-    } = req.body;
+    await client.query("BEGIN");
+    const { deleted, ids, facePublicIds } = await bulkDeleteUsersWithArrearsAndOrphans(
+      client,
+      DEFAULT_ARREARS_THRESHOLD
+    );
+    await client.query("COMMIT");
 
-    // Validaciones
-    if (!name_user || !phone || !id_plan || !id_method || !receipt_number) {
-      return res.status(400).json({ 
-        error: "name_user, phone, id_plan, id_method y receipt_number son requeridos" 
-      });
+    if (facePublicIds.length > 0) {
+      await Promise.allSettled(
+        facePublicIds.map((publicId) => deleteFaceImageByPublicId(publicId))
+      );
     }
 
-    // Verificar que el usuario existe
+    return { deleted, ids };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Elimina un usuario por id y todas sus membresías.
+ */
+export const deleteUserWithMembership = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+
     const userCheck = await pool.query(
-      "SELECT id_user FROM users WHERE id_user = $1",
-      [userId]
+      "SELECT id_user, face_public_id FROM users WHERE id_user = $1",
+      [id]
     );
     if (userCheck.rows.length === 0) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({ message: "User not found" });
     }
+    const facePublicId = userCheck.rows[0].face_public_id;
 
-    // Verificar que el teléfono no esté duplicado (excluyendo el usuario actual)
-    const phoneCheck = await pool.query(
-      "SELECT id_user FROM users WHERE phone = $1 AND id_user != $2",
-      [phone, userId]
-    );
-    if (phoneCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Phone number already exists" });
-    }
-
-    // Verificar que el receipt_number no esté duplicado (excluyendo la membresía actual del usuario)
-    const receiptCheck = await pool.query(`
-      SELECT m.id_membership 
-      FROM memberships m 
-      WHERE m.receipt_number = $1 
-      AND m.id_user != $2
-    `, [receipt_number, userId]);
-    if (receiptCheck.rows.length > 0) {
-      return res.status(400).json({ error: "Receipt number already exists" });
-    }
-
-    // Verificar que el plan existe
-    const planResult = await pool.query(
-      "SELECT days_duration FROM plans WHERE id_plan = $1",
-      [id_plan]
-    );
-    if (planResult.rows.length === 0) {
-      return res.status(404).json({ error: "Plan not found" });
-    }
-    const daysDuration = planResult.rows[0].days_duration;
-
-    // Verificar que el método de pago existe
-    const methodResult = await pool.query(
-      "SELECT id_method FROM payment_methods WHERE id_method = $1",
-      [id_method]
-    );
-    if (methodResult.rows.length === 0) {
-      return res.status(404).json({ error: "Payment method not found" });
-    }
-
-    // Obtener el manager actual si no se proporciona uno nuevo
-    let finalManagerId = req.manager.id_manager;
-    if (!id_manager) {
-      const currentMembership = await pool.query(`
-        SELECT id_manager FROM memberships 
-        WHERE id_user = $1 
-        ORDER BY id_membership DESC 
-        LIMIT 1
-      `, [userId]);
-      if (currentMembership.rows.length === 0 || !currentMembership.rows[0].id_manager) {
-        // Si no hay membresía previa o el id_manager es null, usa el admin logueado
-        finalManagerId = req.manager.id_manager;
-      } else {
-        finalManagerId = currentMembership.rows[0].id_manager;
-      }
-    } else {
-      // Verificar que el manager existe si se proporciona uno nuevo
-      const managerResult = await pool.query(
-        "SELECT id_manager FROM managers WHERE id_manager = $1",
-        [id_manager]
-      );
-      if (managerResult.rows.length === 0) {
-        return res.status(404).json({ error: "Manager not found" });
-      }
-      finalManagerId = id_manager;
-    }
-
-    // Iniciar transacción
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
-      // 1. Actualizar el usuario con fecha de inscripción personalizada
-      if (registration_date) {
-        await client.query(`
-          UPDATE users 
-          SET name_user = $1, phone = $2, created_at = $3
-          WHERE id_user = $4
-        `, [name_user, phone, registration_date, userId]);
-      } else {
-        await client.query(`
-          UPDATE users 
-          SET name_user = $1, phone = $2
-          WHERE id_user = $3
-        `, [name_user, phone, userId]);
-      }
-
-      // 2. Obtener la membresía activa/más reciente
-      const currentMembership = await client.query(`
-        SELECT id_membership, id_state
-        FROM memberships 
-        WHERE id_user = $1 
-        ORDER BY id_membership DESC 
-        LIMIT 1
-      `, [userId]);
-
-      if (currentMembership.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ error: "No membership found for user" });
-      }
-
-      // 3. Actualizar la membresía existente
-      const membershipId = currentMembership.rows[0].id_membership;
-
-      // Calcular nueva fecha de expiración basada en la fecha de último pago
-      let expirationDate;
-      if (last_payment_date) {
-        expirationDate = new Date(last_payment_date);
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-      } else {
-        expirationDate = new Date();
-        expirationDate.setDate(expirationDate.getDate() + daysDuration - 1);
-      }
-      const expirationDateStr = expirationDate.toISOString().split('T')[0];
-
-      // Calcular estado y días de mora
-      const today = new Date();
-      const expiration = new Date(expirationDateStr);
-      const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-      
-      let stateName;
-      let daysArrears = 0;
-      
-      if (daysUntilExpiration > 5) {
-        stateName = "Vigente";
-      } else if (daysUntilExpiration >= 0) {
-        stateName = "Por vencer";
-      } else {
-        stateName = "Vencido";
-        daysArrears = Math.abs(daysUntilExpiration);
-      }
-      
-      const stateResult = await client.query(
-        "SELECT id_state FROM states WHERE name_state = $1",
-        [stateName]
-      );
-      
-      if (stateResult.rows.length === 0) {
-        throw new Error(`State '${stateName}' not found in database`);
-      }
-      
-      const id_state = stateResult.rows[0].id_state;
-
-      // Actualizar la membresía con fecha de último pago personalizada
-      await client.query(`
-        UPDATE memberships 
-        SET last_payment = $1,
-            expiration_date = $2,
-            receipt_number = $3,
-            days_arrears = $4,
-            id_plan = $5,
-            id_method = $6,
-            id_state = $7,
-            id_manager = $8
-        WHERE id_membership = $9
-      `, [
-        last_payment_date || new Date(), // Usar fecha personalizada o fecha actual
-        expirationDateStr,
-        receipt_number,
-        daysArrears,
-        id_plan,
-        id_method,
-        id_state,
-        finalManagerId,
-        membershipId
-      ]);
-
+      await client.query("DELETE FROM memberships WHERE id_user = $1", [id]);
+      const { rowCount } = await client.query("DELETE FROM users WHERE id_user = $1", [id]);
       await client.query('COMMIT');
-      
-      // Obtener datos actualizados del usuario
-      const updatedUserResult = await client.query(`
-        SELECT id_user, name_user, phone, 
-          TO_CHAR(created_at, 'YYYY-MM-DD') as created_at
-        FROM users 
-        WHERE id_user = $1
-      `, [userId]);
-      
-      res.status(200).json({
-        message: "User updated successfully",
-        user: updatedUserResult.rows[0]
-      });
+      if (rowCount === 0) return res.status(404).json({ message: "User not found" });
+
+      if (facePublicId) {
+        await deleteFaceImageByPublicId(facePublicId);
+      }
+
+      return res.sendStatus(204);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

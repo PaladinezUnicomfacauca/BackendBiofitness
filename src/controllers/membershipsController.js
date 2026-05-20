@@ -1,75 +1,14 @@
 import { pool } from "../db/conn.js";
 import ExcelJS from 'exceljs';
-
-// Función helper para calcular el estado y días de mora basado en la fecha de expiración
-const calculateStateAndArrears = async (expirationDate) => {
-  const today = new Date();
-  const expiration = new Date(expirationDate);
-  
-  // Calcular días hasta la expiración (puede ser negativo si ya expiró)
-  const daysUntilExpiration = Math.ceil((expiration - today) / (1000 * 60 * 60 * 24));
-  
-  let stateName;
-  let daysArrears = 0;
-  
-  if (daysUntilExpiration > 5) {
-    // Más de 5 días hasta la expiración = Vigente
-    stateName = "Vigente";
-  } else if (daysUntilExpiration >= 0) {
-    // Entre 0 y 5 días hasta la expiración = Por vencer
-    stateName = "Por vencer";
-  } else {
-    // Ya expiró = Vencido
-    stateName = "Vencido";
-    daysArrears = Math.abs(daysUntilExpiration);
-  }
-  
-  // Obtener el ID del estado
-  const stateResult = await pool.query(
-    "SELECT id_state FROM states WHERE name_state = $1",
-    [stateName]
-  );
-  
-  if (stateResult.rows.length === 0) {
-    throw new Error(`State '${stateName}' not found in database`);
-  }
-  
-  return {
-    id_state: stateResult.rows[0].id_state,
-    days_arrears: daysArrears
-  };
-};
-
-// Función interna para actualizar automáticamente estados y días de mora de todas las membresías
-const updateAllMembershipStatesInternal = async () => {
-  // Obtener todas las membresías
-  const { rows: memberships } = await pool.query(`
-    SELECT id_membership, expiration_date, days_arrears, id_state 
-    FROM memberships
-  `);
-
-  let updatedCount = 0;
-  
-  for (const membership of memberships) {
-    const { id_state: newStateId, days_arrears: newDaysArrears } = await calculateStateAndArrears(membership.expiration_date);
-    
-    // Solo actualizar si hay cambios
-    if (newStateId !== membership.id_state || newDaysArrears !== membership.days_arrears) {
-      await pool.query(
-        "UPDATE memberships SET id_state = $1, days_arrears = $2 WHERE id_membership = $3",
-        [newStateId, newDaysArrears, membership.id_membership]
-      );
-      updatedCount++;
-    }
-  }
-  
-  return { updatedCount };
-};
+import {
+  bulkUpdateAllMembershipStates,
+  calculateStateAndArrears,
+} from "../utils/membershipState.js";
 
 // Función para actualizar automáticamente estados y días de mora de todas las membresías
 export const updateAllMembershipStates = async (req, res) => {
   try {
-    const result = await updateAllMembershipStatesInternal();
+    const result = await bulkUpdateAllMembershipStates();
     return res.status(200).json({ 
       message: `Updated ${result.updatedCount} memberships`, 
       updatedCount: result.updatedCount 
@@ -83,7 +22,7 @@ export const updateAllMembershipStates = async (req, res) => {
 export const getMemberships = async (req, res) => {
   try {
     // Primero actualizar automáticamente todos los estados y días de mora
-    await updateAllMembershipStatesInternal();
+    await bulkUpdateAllMembershipStates();
     
     const { rows } = await pool.query(`
       SELECT m.id_membership,
@@ -438,7 +377,7 @@ export const deleteMembership = async (req, res) => {
 export const getActiveMemberships = async (req, res) => {
   try {
     // Primero actualizar automáticamente todos los estados y días de mora
-    await updateAllMembershipStatesInternal();
+    await bulkUpdateAllMembershipStates();
     
     const { rows } = await pool.query(`
       SELECT m.id_membership,
@@ -473,7 +412,7 @@ export const exportMembershipsToExcel = async (req, res) => {
     const { searchTerm, selectedState, selectedPlan } = req.query;
     
     // Primero actualizar automáticamente todos los estados y días de mora
-    await updateAllMembershipStatesInternal();
+    await bulkUpdateAllMembershipStates();
     
     // Construir la consulta base
     let query = `

@@ -27,6 +27,8 @@ CREATE TABLE users (
     id_user SERIAL PRIMARY KEY,
     name_user VARCHAR(40) NOT NULL,
     phone VARCHAR(10) UNIQUE NOT NULL,
+    face TEXT,
+    face_public_id TEXT,
     created_at DATE DEFAULT CURRENT_DATE
 );
 
@@ -36,6 +38,8 @@ CREATE TABLE memberships (
     expiration_date DATE NOT NULL,
     receipt_number VARCHAR(10) UNIQUE NOT NULL,
     days_arrears INT DEFAULT 0, 
+    pay INT DEFAULT 0 NOT NULL,
+    owe INT DEFAULT 0 NOT NULL,
     manager_name_snapshot VARCHAR(40),
     id_manager INTEGER NULL REFERENCES managers(id_manager)
         ON DELETE SET NULL  
@@ -53,3 +57,5 @@ CREATE TABLE memberships (
         ON DELETE RESTRICT   
         ON UPDATE CASCADE 
 );
+
+-- Ver indexes.sql para índices en bases ya creadas (CREATE INDEX IF NOT EXISTS).

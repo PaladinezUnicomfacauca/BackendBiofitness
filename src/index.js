@@ -55,7 +55,7 @@ cron.schedule('0 0 * * *', async () => {
   console.log(`[${new Date().toISOString()}] Ejecutando actualización automática de estados de membresías...`);
   try {
     // Importar dinámicamente para evitar problemas de dependencias circulares
-    const { updateAllMembershipStates } = await import('../scripts/updateStates.js');
+    const { updateAllMembershipStates } = await import('./jobs/updateMembershipStates.js');
     await updateAllMembershipStates();
     console.log(`[${new Date().toISOString()}] Actualización automática completada exitosamente`);
   } catch (error) {
@@ -66,6 +66,24 @@ cron.schedule('0 0 * * *', async () => {
   timezone: "America/Bogota" // Ajustar a tu zona horaria
 });
 
+// Cron: eliminar usuarios y membresías con days_arrears > 20 diariamente a las 0:00 AM (medianoche)
+cron.schedule('0 0 * * *', async () => {
+  console.log(`[${new Date().toISOString()}] Ejecutando limpieza de usuarios con mora > 20 días...`);
+  try {
+    const { deleteUsersWithArrearsOverThreshold } = await import('./controllers/usersController.js');
+    const result = await deleteUsersWithArrearsOverThreshold();
+    if (result.deleted > 0) {
+      console.log(`[${new Date().toISOString()}] Eliminados ${result.deleted} usuario(s) con mora > 20 días. IDs: ${result.ids.join(', ')}`);
+    } else {
+      console.log(`[${new Date().toISOString()}] No hay usuarios con mora > 20 días para eliminar`);
+    }
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error en limpieza por mora:`, error.message);
+  }
+}, {
+  scheduled: true,
+  timezone: "America/Bogota"
+});
 
 // Middleware para rutas no encontradas
 app.use((req, res, next) => {
@@ -79,6 +97,19 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Servidor corriendo en http://localhost:${PORT} [${process.env.NODE_ENV || "dev"}] - ${new Date().toLocaleString()}`);
+
+  // Limpieza al iniciar solo en desarrollo (en producción solo corre el cron a las 00:00)
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const { deleteUsersWithArrearsOverThreshold } = await import('./controllers/usersController.js');
+      const result = await deleteUsersWithArrearsOverThreshold();
+      if (result.deleted > 0) {
+        console.log(`[Inicio] Eliminados ${result.deleted} usuario(s) con mora > 20 días. IDs: ${result.ids.join(', ')}`);
+      }
+    } catch (err) {
+      console.error('[Inicio] Error en limpieza por mora:', err.message);
+    }
+  }
 });
