@@ -97,7 +97,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
+app.listen(PORT, "0.0.0.0", async () => {
   console.log(`Servidor corriendo en http://localhost:${PORT} [${process.env.NODE_ENV || "dev"}] - ${new Date().toLocaleString()}`);
 
   // Limpieza al iniciar solo en desarrollo (en producción solo corre el cron a las 00:00)
