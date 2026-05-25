@@ -226,6 +226,10 @@ export const createUserWithMembership = async (req, res) => {
     const id_method = parseInt(req.body.id_method, 10);
     const id_manager = parseInt(req.body.id_manager, 10);
 
+    // Fechas enviadas desde el frontend, si no se envían usar la fecha actual
+    const enrollment_date = req.body.enrollment_date ? new Date(req.body.enrollment_date) : new Date();
+    const last_payment_date = req.body.last_payment_date ? new Date(req.body.last_payment_date) : new Date();
+
     // Validaciones
     if (!name_user || !phone || !receipt_number || Number.isNaN(id_plan) || Number.isNaN(id_method) || Number.isNaN(id_manager)) {
       return res.status(400).json({ 
@@ -300,11 +304,12 @@ export const createUserWithMembership = async (req, res) => {
       await client.query('BEGIN');
 
       // 1. Crear el usuario
+      const enrollmentDateStr = enrollment_date.toISOString().split('T')[0];
       const userResult = await client.query(`
-        INSERT INTO users (name_user, phone, face, face_public_id)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO users (name_user, phone, face, face_public_id, created_at)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id_user
-      `, [name_user, phone, faceUrl, facePublicId]);
+      `, [name_user, phone, faceUrl, facePublicId, enrollmentDateStr]);
       
       const userId = userResult.rows[0].id_user;
 
@@ -342,6 +347,7 @@ export const createUserWithMembership = async (req, res) => {
       const owe = planPrice - pay;
 
       // 6. Crear la membresía
+      const lastPaymentDateStr = last_payment_date.toISOString().split('T')[0];
       const membershipResult = await client.query(`
         INSERT INTO memberships (
           last_payment,
@@ -357,7 +363,6 @@ export const createUserWithMembership = async (req, res) => {
           id_manager
         )
         VALUES (
-          CURRENT_DATE,
           $1,
           $2,
           $3,
@@ -367,10 +372,12 @@ export const createUserWithMembership = async (req, res) => {
           $7,
           $8,
           $9,
-          $10
+          $10,
+          $11
         )
         RETURNING id_membership, receipt_number
       `, [
+        lastPaymentDateStr,
         expirationDateStr,
         receipt_number,
         daysArrears,
